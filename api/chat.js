@@ -107,7 +107,7 @@ export default async function handler(req, res) {
     // Wait for completion with timeout
     let runStatus = run;
     let attempts = 0;
-    const maxAttempts = 5; // Vercel has longer timeout (10s default)
+    const maxAttempts = 30; // Vercel has longer timeout (10s default)
     
     while ((runStatus.status === 'queued' || runStatus.status === 'in_progress') && attempts < maxAttempts) {
       await new Promise(resolve => setTimeout(resolve, 1000));
