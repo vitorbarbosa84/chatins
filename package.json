@@ -1,0 +1,14 @@
+{
+  "name": "openai-assistant-chat",
+  "version": "1.0.0",
+  "description": "Chat widget for OpenAI Assistant",
+  "main": "index.html",
+  "scripts": {
+    "dev": "vercel dev",
+    "build": "echo 'No build step required'"
+  },
+  "dependencies": {},
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}
