@@ -32,7 +32,7 @@ export default async function handler(req, res) {
     const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
     const GOOGLE_SHEETS_API_KEY = process.env.GOOGLE_SHEETS_API_KEY;
     const SPREADSHEET_ID = process.env.GOOGLE_SPREADSHEET_ID;
-    const ASSISTANT_ID = process.env.OPENAI_ASSISTANT_ID || 'asst_Gh8RwDmieO4Rykegs7V1fzbe';
+    const ASSISTANT_ID = process.env.OPENAI_ASSISTANT_ID || 'asst_nde5BtCQoa0yikOBaQI114ce';
 
     // Validate required environment variables
     if (!OPENAI_API_KEY) {
