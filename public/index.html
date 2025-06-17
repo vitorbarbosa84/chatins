@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>AI Assistant Chat</title>
+    <title>Cybersecurity Insurance Assessment</title>
     <style>
         * {
             margin: 0;
@@ -39,6 +39,7 @@
             color: white;
             padding: 20px;
             text-align: center;
+            position: relative;
         }
 
         .chat-header h1 {
@@ -49,6 +50,30 @@
         .chat-header p {
             opacity: 0.9;
             font-size: 14px;
+        }
+
+        .header-buttons {
+            margin-top: 15px;
+            display: flex;
+            justify-content: center;
+            gap: 10px;
+            flex-wrap: wrap;
+        }
+
+        .header-btn {
+            background: rgba(255,255,255,0.2);
+            color: white;
+            border: 1px solid rgba(255,255,255,0.3);
+            border-radius: 20px;
+            padding: 8px 16px;
+            font-size: 12px;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .header-btn:hover {
+            background: rgba(255,255,255,0.3);
+            transform: translateY(-1px);
         }
 
         .chat-messages {
@@ -85,6 +110,17 @@
             line-height: 1.6;
         }
 
+        .message.quote {
+            background: linear-gradient(135deg, #10b981, #059669);
+            color: white;
+            align-self: flex-start;
+            border-bottom-left-radius: 4px;
+            max-width: 95%;
+            font-family: 'Courier New', monospace;
+            font-size: 14px;
+            line-height: 1.5;
+        }
+
         .message.loading {
             background: #f1f5f9;
             color: #64748b;
@@ -101,6 +137,7 @@
         .chat-input-form {
             display: flex;
             gap: 12px;
+            align-items: flex-end;
         }
 
         .chat-input {
@@ -116,6 +153,7 @@
             transition: border-color 0.2s;
             line-height: 1.5;
             overflow-y: auto;
+            font-family: inherit;
         }
 
         .chat-input:focus {
@@ -131,6 +169,7 @@
             cursor: pointer;
             font-weight: 500;
             transition: background-color 0.2s;
+            white-space: nowrap;
         }
 
         .send-button:hover:not(:disabled) {
@@ -145,13 +184,13 @@
         .welcome-section {
             text-align: center;
             padding: 40px 20px;
-            max-width: 500px;
+            max-width: 600px;
             margin: 0 auto;
         }
 
         .welcome-text h2 {
             color: #1e293b;
-            font-size: 24px;
+            font-size: 28px;
             margin-bottom: 16px;
             font-weight: 600;
         }
@@ -159,20 +198,20 @@
         .welcome-text p {
             color: #64748b;
             font-size: 16px;
-            line-height: 1.5;
+            line-height: 1.6;
             margin-bottom: 32px;
         }
 
         .welcome-buttons {
             display: flex;
             flex-direction: column;
-            gap: 12px;
-            max-width: 300px;
+            gap: 16px;
+            max-width: 400px;
             margin: 0 auto;
         }
 
         .start-button, .continue-button {
-            padding: 16px 24px;
+            padding: 18px 32px;
             border: none;
             border-radius: 12px;
             font-size: 16px;
@@ -180,6 +219,10 @@
             cursor: pointer;
             transition: all 0.2s;
             text-align: center;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
         }
 
         .start-button {
@@ -204,40 +247,124 @@
             border-color: #6366f1;
         }
 
-        .welcome-message {
-            text-align: center;
-            color: #64748b;
-            font-style: italic;
-            margin: 40px 0;
+        .quick-start-section {
+            background: #f8fafc;
+            padding: 20px;
+            border-radius: 12px;
+            margin-top: 20px;
+        }
+
+        .quick-start-section h3 {
+            color: #1e293b;
+            font-size: 18px;
+            margin-bottom: 12px;
+        }
+
+        .quick-actions {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 12px;
+        }
+
+        .quick-action-btn {
+            background: white;
+            border: 1px solid #e2e8f0;
+            border-radius: 8px;
+            padding: 12px 16px;
+            text-align: left;
+            cursor: pointer;
+            transition: all 0.2s;
+            font-size: 14px;
+        }
+
+        .quick-action-btn:hover {
+            border-color: #6366f1;
+            background: #f8fafc;
+            transform: translateY(-1px);
+        }
+
+        .quick-action-btn .emoji {
+            margin-right: 8px;
+            font-size: 16px;
+        }
+
+        .status-indicator {
+            position: absolute;
+            top: 10px;
+            right: 20px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 12px;
+            opacity: 0.8;
+        }
+
+        .status-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: #10b981;
+            animation: pulse 2s infinite;
+        }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
         }
 
         /* Responsive design */
         @media (max-width: 768px) {
             .chat-messages {
-                padding: 20px;
-                gap: 12px;
+                padding: 15px;
+                gap: 10px;
             }
             
             .chat-input-container {
-                padding: 20px;
+                padding: 15px;
             }
             
-            .message.assistant {
+            .message.assistant, .message.quote {
                 max-width: 95%;
             }
             
             .message.user {
                 max-width: 85%;
             }
+
+            .welcome-text h2 {
+                font-size: 24px;
+            }
+
+            .welcome-buttons {
+                max-width: 100%;
+            }
+
+            .quick-actions {
+                grid-template-columns: 1fr;
+            }
+
+            .header-buttons {
+                flex-direction: column;
+                align-items: center;
+            }
         }
 
         @media (max-width: 480px) {
             .chat-messages {
-                padding: 15px;
+                padding: 12px;
             }
             
             .chat-input-container {
-                padding: 15px;
+                padding: 12px;
+            }
+
+            .welcome-section {
+                padding: 30px 15px;
+            }
+
+            .start-button, .continue-button {
+                padding: 16px 24px;
+                font-size: 15px;
             }
         }
     </style>
@@ -245,15 +372,30 @@
 <body>
     <div class="chat-container">
         <div class="chat-header">
-            <h1>AI Assistant</h1>
-            <p>Ask me anything - I'm here to help!</p>
+            <div class="status-indicator">
+                <div class="status-dot"></div>
+                <span>AI Assistant Online</span>
+            </div>
+            <h1>🛡️ Cybersecurity Insurance Assessment</h1>
+            <p>AI-powered risk assessment and instant quote generation</p>
+            <div class="header-buttons">
+                <button class="header-btn" onclick="chatWidget.clearThread()">
+                    🔄 New Assessment
+                </button>
+                <button class="header-btn" onclick="chatWidget.showQuickHelp()">
+                    ❓ Quick Help
+                </button>
+                <button class="header-btn" onclick="chatWidget.exportConversation()">
+                    📄 Export Chat
+                </button>
+            </div>
         </div>
         
         <div class="chat-messages" id="chatMessages">
             <div class="welcome-section" id="welcomeSection">
                 <div class="welcome-text">
-                    <h2>🛡️ Cyber Security Insurance Assessment</h2>
-                    <p>Get a personalized cyber security assessment to understand your insurance needs and improve your security posture.</p>
+                    <h2>Welcome to Your Cybersecurity Assessment</h2>
+                    <p>Get a comprehensive evaluation of your organization's cybersecurity posture and receive an instant insurance quote tailored to your risk profile.</p>
                 </div>
                 <div class="welcome-buttons">
                     <button class="start-button" id="startAssessment">
@@ -263,6 +405,28 @@
                         📋 Continue Previous Session
                     </button>
                 </div>
+                
+                <div class="quick-start-section">
+                    <h3>Quick Actions</h3>
+                    <div class="quick-actions">
+                        <button class="quick-action-btn" onclick="chatWidget.quickStart('company-info')">
+                            <span class="emoji">🏢</span>
+                            Tell me about your company
+                        </button>
+                        <button class="quick-action-btn" onclick="chatWidget.quickStart('security-overview')">
+                            <span class="emoji">🔒</span>
+                            Security overview assessment
+                        </button>
+                        <button class="quick-action-btn" onclick="chatWidget.quickStart('current-insurance')">
+                            <span class="emoji">📋</span>
+                            Review current insurance
+                        </button>
+                        <button class="quick-action-btn" onclick="chatWidget.quickStart('incident-history')">
+                            <span class="emoji">⚠️</span>
+                            Discuss incident history
+                        </button>
+                    </div>
+                </div>
             </div>
         </div>
         
@@ -271,7 +435,7 @@
                 <textarea 
                     class="chat-input" 
                     id="messageInput" 
-                    placeholder="Type your message here..."
+                    placeholder="Ask me about cybersecurity insurance, describe your company, or start your assessment..."
                     autocomplete="off"
                     required
                     rows="1"
@@ -291,17 +455,13 @@
                 this.messageInput = document.getElementById('messageInput');
                 this.sendButton = document.getElementById('sendButton');
                 this.userId = this.generateUserId();
-                this.threadId = this.getStoredThreadId(); // Get existing thread
-                this.apiUrl = '/api/chat.php'; // PHP backend
+                this.threadId = this.getStoredThreadId();
+                this.apiUrl = '/api/chat'; // Changed from PHP to Vercel API route
                 
                 this.init();
-                
-                // Add a "New Conversation" button
-                this.addNewConversationButton();
             }
             
             generateUserId() {
-                // Get or create a persistent user ID
                 let userId = localStorage.getItem('chat_user_id');
                 if (!userId) {
                     userId = 'user_' + Math.random().toString(36).substr(2, 9);
@@ -310,18 +470,15 @@
                 return userId;
             }
             
-            // Get stored thread ID from browser
             getStoredThreadId() {
                 return localStorage.getItem('chat_thread_id');
             }
             
-            // Store thread ID in browser
             setStoredThreadId(threadId) {
                 localStorage.setItem('chat_thread_id', threadId);
                 this.threadId = threadId;
             }
             
-            // Clear thread for new conversation
             clearThread() {
                 localStorage.removeItem('chat_thread_id');
                 this.threadId = null;
@@ -330,8 +487,8 @@
                 this.chatMessages.innerHTML = `
                     <div class="welcome-section" id="welcomeSection">
                         <div class="welcome-text">
-                            <h2>🛡️ Cyber Security Insurance Assessment</h2>
-                            <p>Get a personalized cyber security assessment to understand your insurance needs and improve your security posture.</p>
+                            <h2>Welcome to Your Cybersecurity Assessment</h2>
+                            <p>Get a comprehensive evaluation of your organization's cybersecurity posture and receive an instant insurance quote tailored to your risk profile.</p>
                         </div>
                         <div class="welcome-buttons">
                             <button class="start-button" id="startAssessment">
@@ -341,95 +498,153 @@
                                 📋 Continue Previous Session
                             </button>
                         </div>
+                        
+                        <div class="quick-start-section">
+                            <h3>Quick Actions</h3>
+                            <div class="quick-actions">
+                                <button class="quick-action-btn" onclick="chatWidget.quickStart('company-info')">
+                                    <span class="emoji">🏢</span>
+                                    Tell me about your company
+                                </button>
+                                <button class="quick-action-btn" onclick="chatWidget.quickStart('security-overview')">
+                                    <span class="emoji">🔒</span>
+                                    Security overview assessment
+                                </button>
+                                <button class="quick-action-btn" onclick="chatWidget.quickStart('current-insurance')">
+                                    <span class="emoji">📋</span>
+                                    Review current insurance
+                                </button>
+                                <button class="quick-action-btn" onclick="chatWidget.quickStart('incident-history')">
+                                    <span class="emoji">⚠️</span>
+                                    Discuss incident history
+                                </button>
+                            </div>
+                        </div>
                     </div>
                 `;
                 
-                // Re-initialize welcome buttons
                 this.initWelcomeButtons();
-            }
-            
-            addNewConversationButton() {
-                const header = document.querySelector('.chat-header');
-                const newConvButton = document.createElement('button');
-                newConvButton.textContent = '🔄 New Conversation';
-                newConvButton.style.cssText = `
-                    background: rgba(255,255,255,0.2);
-                    color: white;
-                    border: 1px solid rgba(255,255,255,0.3);
-                    border-radius: 20px;
-                    padding: 8px 16px;
-                    font-size: 12px;
-                    cursor: pointer;
-                    margin-top: 10px;
-                `;
-                newConvButton.addEventListener('click', () => {
-                    if (confirm('Start a new conversation? This will clear the current chat.')) {
-                        this.clearThread();
-                    }
-                });
-                header.appendChild(newConvButton);
             }
             
             init() {
                 this.chatForm.addEventListener('submit', (e) => this.handleSubmit(e));
+                
+                // Auto-resize textarea
+                this.messageInput.addEventListener('input', () => {
+                    this.autoResizeTextarea();
+                });
+                
                 this.messageInput.addEventListener('keydown', (e) => {
                     if (e.key === 'Enter' && !e.shiftKey) {
                         e.preventDefault();
                         this.handleSubmit(e);
                     }
-                    // else, let Shift+Enter insert a newline (default behavior)
                 });
                 
-                // Initialize welcome buttons
                 this.initWelcomeButtons();
-                
-                // Check if user has previous session
                 this.checkForPreviousSession();
+            }
+            
+            autoResizeTextarea() {
+                this.messageInput.style.height = 'auto';
+                this.messageInput.style.height = Math.min(this.messageInput.scrollHeight, 120) + 'px';
             }
             
             initWelcomeButtons() {
                 const startButton = document.getElementById('startAssessment');
                 const continueButton = document.getElementById('continueSession');
                 
-                startButton.addEventListener('click', () => {
-                    this.startNewAssessment();
-                });
+                if (startButton) {
+                    startButton.addEventListener('click', () => {
+                        this.startNewAssessment();
+                    });
+                }
                 
-                continueButton.addEventListener('click', () => {
-                    this.continueAssessment();
-                });
+                if (continueButton) {
+                    continueButton.addEventListener('click', () => {
+                        this.continueAssessment();
+                    });
+                }
             }
             
             checkForPreviousSession() {
                 const hasExistingThread = !!this.threadId;
                 const continueButton = document.getElementById('continueSession');
                 
-                if (hasExistingThread) {
+                if (hasExistingThread && continueButton) {
                     continueButton.style.display = 'block';
-                    continueButton.textContent = '📋 Continue Previous Assessment';
+                    continueButton.innerHTML = '📋 Continue Previous Assessment';
                 }
             }
             
             startNewAssessment() {
-                // Clear any existing thread
                 this.clearThread();
-                
-                // Hide welcome section
                 this.hideWelcomeSection();
-                
-                // Auto-start the assessment
-                this.sendMessage("I want to get a cyber security insurance assessment");
-                
-                // Focus on input
+                this.sendMessage("I want to get a comprehensive cybersecurity insurance assessment for my organization. Can you help me get started?");
                 this.focusInput();
             }
             
             continueAssessment() {
-                // Hide welcome section
                 this.hideWelcomeSection();
-                
-                // Focus on input for user to continue
+                this.addMessage("Welcome back! Let's continue with your cybersecurity assessment.", 'assistant');
                 this.focusInput();
+            }
+            
+            quickStart(type) {
+                const messages = {
+                    'company-info': "Let me tell you about my company so you can provide a tailored cybersecurity assessment.",
+                    'security-overview': "I'd like to do a comprehensive security overview assessment for my organization.",
+                    'current-insurance': "Can you help me review my current cyber insurance coverage and see if I need changes?",
+                    'incident-history': "I want to discuss my organization's cybersecurity incident history and how it affects my insurance needs."
+                };
+                
+                this.hideWelcomeSection();
+                this.sendMessage(messages[type]);
+                this.focusInput();
+            }
+            
+            showQuickHelp() {
+                const helpMessage = `**Quick Help Guide:**
+
+**Assessment Process:**
+• Company profile and industry classification
+• Security controls evaluation (18 categories)
+• Risk scoring and quote generation
+• Recommendations for improvement
+
+**What to Prepare:**
+• Company size and industry
+• Current security tools and policies
+• Previous cyber incidents (if any)
+• Existing insurance information
+
+**Assessment Categories:**
+• Multi-factor authentication
+• Backup and recovery systems
+• Vulnerability management
+• Employee training programs
+• And 14 more security areas
+
+**Getting Started:**
+Just describe your company or ask specific questions about cybersecurity insurance. I'll guide you through the process!`;
+
+                this.hideWelcomeSection();
+                this.addAssistantMessage(helpMessage);
+            }
+            
+            exportConversation() {
+                const messages = Array.from(document.querySelectorAll('.message')).map(msg => {
+                    const type = msg.classList.contains('user') ? 'You' : 'AI Assistant';
+                    return `[${type}]: ${msg.textContent}`;
+                }).join('\n\n');
+                
+                const blob = new Blob([messages], { type: 'text/plain' });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = `cybersecurity-assessment-${new Date().toISOString().split('T')[0]}.txt`;
+                a.click();
+                URL.revokeObjectURL(url);
             }
             
             hideWelcomeSection() {
@@ -440,7 +655,6 @@
             }
             
             focusInput() {
-                // Focus on the input field
                 this.messageInput.focus();
             }
             
@@ -451,6 +665,11 @@
                 text = text.replace(/\*(.*?)\*/g, '<em>$1</em>');
                 // Convert newlines to <br> tags
                 text = text.replace(/\n/g, '<br>');
+                
+                // Convert bullet points
+                text = text.replace(/^• (.*$)/gim, '<span style="margin-left: 16px;">• $1</span>');
+                text = text.replace(/^- (.*$)/gim, '<span style="margin-left: 16px;">• $1</span>');
+                
                 return text;
             }
             
@@ -464,25 +683,19 @@
             }
             
             async sendMessage(message) {
-                // Add user message
                 this.addMessage(message, 'user');
                 this.messageInput.value = '';
+                this.autoResizeTextarea();
                 this.setLoading(true);
                 
-                // Add loading message
-                const loadingId = this.addMessage('Thinking...', 'loading');
+                const loadingId = this.addMessage('Analyzing your request...', 'loading');
                 
                 try {
-                    //console.log('Calling API:', this.apiUrl); // Debug log
-                    
-                    // Include thread ID in request if we have one
                     const requestBody = {
                         message: message,
                         userId: this.userId,
                         threadId: this.threadId || null
                     };
-                    
-                    //console.log('Request body:', requestBody); // Debug log
                     
                     const response = await fetch(this.apiUrl, {
                         method: 'POST',
@@ -492,54 +705,64 @@
                         body: JSON.stringify(requestBody)
                     });
                     
-                    //console.log('Response status:', response.status); // Debug log
-                    //console.log('Response ok:', response.ok); // Debug log
-                    
                     if (!response.ok) {
                         const errorText = await response.text();
-                        //console.error('Response error:', errorText);
-                        throw new Error(`HTTP ${response.status}: ${errorText}`);
+                        console.error('API Error:', errorText);
+                        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
                     }
                     
                     const data = await response.json();
-                    //console.log('Response data:', data); // Debug log
                     
-                    // Remove loading message
                     this.removeMessage(loadingId);
                     
                     if (data.success) {
-                        // Store thread ID if it's new
                         if (data.threadId && !this.threadId) {
                             this.setStoredThreadId(data.threadId);
-                            //console.log('Thread saved:', data.threadId);
                         }
                         
-                        this.addAssistantMessage(data.response);
+                        if (data.type === 'quote') {
+                            this.addQuoteMessage(data.response);
+                        } else {
+                            this.addAssistantMessage(data.response);
+                        }
                     } else {
-                        this.addMessage('Sorry, I encountered an error. Please try again.', 'assistant');
+                        this.addMessage('I apologize, but I encountered an error processing your request. Please try again.', 'assistant');
                     }
                     
                 } catch (error) {
-                    //console.error('Error:', error);
+                    console.error('Request Error:', error);
                     this.removeMessage(loadingId);
-                    this.addMessage('Sorry, I\'m having trouble connecting. Please try again.', 'assistant');
+                    this.addMessage('I\'m having trouble connecting right now. Please check your connection and try again.', 'assistant');
                 }
                 
                 this.setLoading(false);
             }
             
             addAssistantMessage(content) {
-                // Hide welcome section when first response comes
                 this.hideWelcomeSection();
                 
                 const messageId = this.addMessage(content, 'assistant');
                 const messageElement = document.getElementById(messageId);
                 
-                // Format the text (convert **bold** to actual bold)
                 const formattedContent = this.formatText(content);
                 messageElement.innerHTML = formattedContent;
                 
-                // Auto-focus input after assistant responds
+                setTimeout(() => {
+                    this.focusInput();
+                }, 100);
+                
+                return messageId;
+            }
+            
+            addQuoteMessage(content) {
+                this.hideWelcomeSection();
+                
+                const messageId = this.addMessage(content, 'quote');
+                const messageElement = document.getElementById(messageId);
+                
+                const formattedContent = this.formatText(content);
+                messageElement.innerHTML = formattedContent;
+                
                 setTimeout(() => {
                     this.focusInput();
                 }, 100);
@@ -548,7 +771,6 @@
             }
             
             addMessage(content, type) {
-                // Remove welcome section if it exists when adding any message
                 const welcomeSection = document.getElementById('welcomeSection');
                 if (welcomeSection && type !== 'loading') {
                     welcomeSection.style.display = 'none';
@@ -576,7 +798,7 @@
             setLoading(isLoading) {
                 this.sendButton.disabled = isLoading;
                 this.messageInput.disabled = isLoading;
-                this.sendButton.textContent = isLoading ? 'Sending...' : 'Send';
+                this.sendButton.textContent = isLoading ? 'Thinking...' : 'Send';
             }
             
             scrollToBottom() {
@@ -585,8 +807,9 @@
         }
         
         // Initialize the chat widget
+        let chatWidget;
         document.addEventListener('DOMContentLoaded', () => {
-            new ChatWidget();
+            chatWidget = new ChatWidget();
         });
     </script>
 </body>
