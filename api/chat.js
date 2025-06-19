@@ -16,7 +16,7 @@ export default async function handler(req, res) {
   const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
   const GOOGLE_SHEETS_API_KEY = process.env.GOOGLE_SHEETS_API_KEY;
   const SPREADSHEET_ID = process.env.GOOGLE_SPREADSHEET_ID;
-  const ASSISTANT_ID = process.env.OPENAI_ASSISTANT_ID || 'asst_Gh8RwDmieO4Rykegs7V1fzbe';
+  const ASSISTANT_ID = process.env.OPENAI_ASSISTANT_ID || 'asst_z7gDB3oQGSKyaqnSmGL82onH';
 
   if (!OPENAI_API_KEY) {
     return res.status(500).json({ 
