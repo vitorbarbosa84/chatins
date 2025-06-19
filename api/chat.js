@@ -104,10 +104,9 @@ export default async function handler(req, res) {
               industry: { type: "string" },
               employee_count: { type: "string" },
               annual_revenue: { type: "string" },
-              user_id: { type: "string" },
-              thread_id: { type: "string" }
+              user_id: { type: "string" }
             },
-            required: ["company_name", "industry", "user_id", "thread_id"]
+            required: ["company_name", "industry", "user_id"]
           }
         }
       },
@@ -137,10 +136,9 @@ export default async function handler(req, res) {
                 minimum: 1,
                 maximum: 4,
                 description: "Score from 1-4 (Poor, Fair, Good, Excellent)"
-              },
-              thread_id: { type: "string" }
+              }
             },
-            required: ["category", "score", "thread_id"]
+            required: ["category", "score"]
           }
         }
       },
@@ -247,11 +245,16 @@ export default async function handler(req, res) {
           let result;
           try {
             if (functionName === 'save_company_info') {
+              // Add the actual thread_id and user_id to the arguments
+              args.thread_id = currentThreadId;
+              args.user_id = userId || 'user_' + Date.now();
               result = await saveCompanyInfo(args, GOOGLE_SHEETS_API_KEY, SPREADSHEET_ID);
             } else if (functionName === 'save_category_score') {
+              // Add the actual thread_id to the arguments
+              args.thread_id = currentThreadId;
               result = await saveCategoryScore(args, GOOGLE_SHEETS_API_KEY, SPREADSHEET_ID);
             } else if (functionName === 'generate_quote') {
-              result = await generateQuoteFromSheets(args.thread_id, GOOGLE_SHEETS_API_KEY, SPREADSHEET_ID);
+              result = await generateQuoteFromSheets(currentThreadId, GOOGLE_SHEETS_API_KEY, SPREADSHEET_ID);
             } else {
               result = { 
                 status: 'error', 
@@ -339,8 +342,13 @@ async function saveCompanyInfo(data, apiKey, spreadsheetId) {
       'Thread ID': 6
     };
     
+    console.log('Sheet headers:', headers);
+    console.log('Existing rows:', rows.length);
+    console.log('Looking for thread:', data.thread_id);
+    
     // Find existing row or create new one
     let rowIndex = rows.findIndex(row => row[6] === data.thread_id); // Thread ID column
+    console.log('Found row index:', rowIndex);
     
     if (rowIndex === -1) {
       // Create new row
@@ -353,7 +361,9 @@ async function saveCompanyInfo(data, apiKey, spreadsheetId) {
       newRow[5] = data.user_id;
       newRow[6] = data.thread_id;
       
-      const appendUrl = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/Assessments!A:A/append?valueInputOption=RAW&insertDataOption=INSERT_ROWS&key=${apiKey}`;
+      console.log('Creating new row:', newRow);
+      
+      const appendUrl = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/Assessments!A1:append?valueInputOption=RAW&insertDataOption=INSERT_ROWS&key=${apiKey}`;
       const appendResp = await fetch(appendUrl, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -361,8 +371,13 @@ async function saveCompanyInfo(data, apiKey, spreadsheetId) {
       });
       
       if (!appendResp.ok) {
-        throw new Error('Failed to append company info');
+        const errorText = await appendResp.text();
+        console.error('Append response error:', errorText);
+        throw new Error(`Failed to append company info: ${appendResp.status} - ${errorText}`);
       }
+      
+      console.log('Row appended successfully');
+    }
     } else {
       // Update existing row
       const updates = [
