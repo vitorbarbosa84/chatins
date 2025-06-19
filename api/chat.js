@@ -1,70 +1,148 @@
-// /api/chat.js
+// api/chat.js - Converted from PHP to JavaScript for Vercel
 
 export default async function handler(req, res) {
-  // --- CORS ---
+  // Handle CORS
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'POST, GET, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
-  
-  if (req.method === 'OPTIONS') return res.status(200).end();
-  
+
+  if (req.method === 'OPTIONS') {
+    return res.status(200).end();
+  }
+
   if (req.method !== 'POST') {
-    return res.status(405).json({ success: false, error: 'Method not allowed. Please use POST.' });
-  }
-
-  // --- ENV ---
-  const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
-  const GOOGLE_SHEETS_API_KEY = process.env.GOOGLE_SHEETS_API_KEY;
-  const SPREADSHEET_ID = process.env.GOOGLE_SPREADSHEET_ID;
-  const ASSISTANT_ID = process.env.OPENAI_ASSISTANT_ID || 'asst_Gh8RwDmieO4Rykegs7V1fzbe';
-
-  if (!OPENAI_API_KEY) {
-    return res.status(500).json({ 
+    return res.status(405).json({ 
       success: false, 
-      error: 'OpenAI API key not configured' 
+      error: 'Method not allowed. Please use POST.' 
     });
   }
-
-  // --- REQUEST DATA ---
-  const { message, userId, threadId, assessmentData } = req.body;
-  
-  if (!message && !assessmentData?.requestQuote) {
-    return res.status(400).json({ 
-      success: false, 
-      error: "Message is required" 
-    });
-  }
-
-  let currentThreadId = threadId;
 
   try {
-    // 1. Create thread if needed
-    if (!currentThreadId) {
-      console.log('Creating new thread...');
-      const threadResp = await fetch('https://api.openai.com/v1/threads', {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${OPENAI_API_KEY}`,
-          'Content-Type': 'application/json',
-          'OpenAI-Beta': 'assistants=v2'
-        }
+    // Get request data
+    const { message, userId, threadId, assessmentData } = req.body;
+    
+    console.log('Received request:', {
+      message: message?.substring(0, 100) + '...',
+      userId,
+      threadId,
+      hasAssessmentData: !!assessmentData
+    });
+    
+    // Get environment variables
+    const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
+    const GOOGLE_SHEETS_API_KEY = process.env.GOOGLE_SHEETS_API_KEY;
+    const SPREADSHEET_ID = process.env.GOOGLE_SPREADSHEET_ID;
+    const ASSISTANT_ID = process.env.OPENAI_ASSISTANT_ID || 'asst_nde5BtCQoa0yikOBaQI114ce';
+
+    // Validate required environment variables
+    if (!OPENAI_API_KEY) {
+      console.error('OPENAI_API_KEY not found in environment variables');
+      return res.status(500).json({ 
+        success: false, 
+        error: 'Server configuration error: Missing OpenAI API key' 
       });
-      
-      if (!threadResp.ok) {
-        const errorText = await threadResp.text();
-        console.error('Thread creation failed:', errorText);
-        throw new Error(`Failed to create thread: ${threadResp.status}`);
-      }
-      
-      const threadJson = await threadResp.json();
-      currentThreadId = threadJson.id;
-      console.log('Thread created:', currentThreadId);
     }
 
-    // 2. Add user message if present
-    if (message) {
-      console.log('Adding message to thread...');
-      const msgResp = await fetch(`https://api.openai.com/v1/threads/${currentThreadId}/messages`, {
+    // Validate required request data
+    if (!message && !assessmentData?.requestQuote) {
+      return res.status(400).json({
+        success: false,
+        error: 'Message is required'
+      });
+    }
+
+    // Check if this is a quote request
+    if (assessmentData && assessmentData.requestQuote) {
+      console.log('Processing insurance quote request...');
+      
+      // Validate required assessment data
+      if (!assessmentData.companyName || !assessmentData.industry) {
+        return res.status(400).json({
+          success: false,
+          error: 'Company name and industry are required for quote generation'
+        });
+      }
+
+      try {
+        // Process quote using Google Sheets
+        if (GOOGLE_SHEETS_API_KEY && SPREADSHEET_ID) {
+          const quote = await processInsuranceQuoteWithSheets(
+            assessmentData, 
+            GOOGLE_SHEETS_API_KEY, 
+            SPREADSHEET_ID
+          );
+          
+          return res.status(200).json({
+            success: true,
+            response: formatQuoteResponse(quote),
+            threadId: threadId,
+            quote: quote,
+            type: 'quote'
+          });
+        } else {
+          // Fallback to local calculation if Google Sheets not configured
+          const quote = calculateQuoteLocally(assessmentData);
+          
+          return res.status(200).json({
+            success: true,
+            response: formatQuoteResponse(quote),
+            threadId: threadId,
+            quote: quote,
+            type: 'quote'
+          });
+        }
+        
+      } catch (error) {
+        console.error('Quote processing error:', error);
+        return res.status(500).json({
+          success: false,
+          error: 'Failed to process insurance quote. Please check your information and try again.'
+        });
+      }
+    }
+
+    // Regular chat processing with OpenAI Assistant
+    console.log('Processing regular chat message...');
+
+    // Get or create thread
+    let currentThreadId = threadId;
+    if (!currentThreadId) {
+      console.log('Creating new OpenAI thread...');
+      
+      try {
+        const threadResponse = await fetch('https://api.openai.com/v1/threads', {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${OPENAI_API_KEY}`,
+            'Content-Type': 'application/json',
+            'OpenAI-Beta': 'assistants=v2'
+          }
+        });
+
+        if (!threadResponse.ok) {
+          const errorText = await threadResponse.text();
+          console.error('Thread creation failed:', errorText);
+          throw new Error(`Failed to create thread: ${threadResponse.status}`);
+        }
+
+        const thread = await threadResponse.json();
+        currentThreadId = thread.id;
+        console.log('New thread created:', currentThreadId);
+      } catch (error) {
+        console.error('Thread creation error:', error);
+        return res.status(500).json({
+          success: false,
+          error: 'Failed to initialize conversation. Please try again.'
+        });
+      }
+    } else {
+      console.log('Using existing thread:', currentThreadId);
+    }
+
+    // Add message to thread
+    console.log('Adding message to thread...');
+    try {
+      const messageResponse = await fetch(`https://api.openai.com/v1/threads/${currentThreadId}/messages`, {
         method: 'POST',
         headers: {
           'Authorization': `Bearer ${OPENAI_API_KEY}`,
@@ -76,369 +154,415 @@ export default async function handler(req, res) {
           content: message
         })
       });
-      
-      if (!msgResp.ok) {
-        const errorText = await msgResp.text();
+
+      if (!messageResponse.ok) {
+        const errorText = await messageResponse.text();
         console.error('Message creation failed:', errorText);
-        throw new Error(`Failed to add message: ${msgResp.status}`);
+        throw new Error(`Failed to add message: ${messageResponse.status}`);
       }
+    } catch (error) {
+      console.error('Message creation error:', error);
+      return res.status(500).json({
+        success: false,
+        error: 'Failed to process your message. Please try again.'
+      });
     }
 
-    // 3. Function definitions
-    const functionTools = [
-      {
-        type: "function",
-        function: {
-          name: "save_answer",
-          description: "Save a user's answer to a specific assessment field",
-          parameters: {
-            type: "object",
-            properties: {
-              field: { type: "string" },
-              value: { type: "string" },
-              user_id: { type: "string" },
-              thread_id: { type: "string" }
-            },
-            required: ["field", "value", "user_id", "thread_id"]
-          }
-        }
-      },
-      {
-        type: "function",
-        function: {
-          name: "generate_quote",
-          description: "Generate insurance quote based on assessment data",
-          parameters: {
-            type: "object",
-            properties: {
-              thread_id: { type: "string" }
-            },
-            required: ["thread_id"]
-          }
-        }
+    // Run the assistant
+    console.log('Running OpenAI assistant...');
+    let runId;
+    try {
+      const runResponse = await fetch(`https://api.openai.com/v1/threads/${currentThreadId}/runs`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${OPENAI_API_KEY}`,
+          'Content-Type': 'application/json',
+          'OpenAI-Beta': 'assistants=v2'
+        },
+        body: JSON.stringify({
+          assistant_id: ASSISTANT_ID
+        })
+      });
+
+      if (!runResponse.ok) {
+        const errorText = await runResponse.text();
+        console.error('Run creation failed:', errorText);
+        throw new Error(`Failed to start assistant: ${runResponse.status}`);
       }
-    ];
 
-    // 4. Start run
-    console.log('Starting assistant run...');
-    const runResp = await fetch(`https://api.openai.com/v1/threads/${currentThreadId}/runs`, {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${OPENAI_API_KEY}`,
-        'Content-Type': 'application/json',
-        'OpenAI-Beta': 'assistants=v2'
-      },
-      body: JSON.stringify({
-        assistant_id: ASSISTANT_ID,
-        tools: functionTools
-      })
-    });
-    
-    if (!runResp.ok) {
-      const errorText = await runResp.text();
-      console.error('Run creation failed:', errorText);
-      throw new Error(`Failed to start run: ${runResp.status}`);
+      const run = await runResponse.json();
+      runId = run.id;
+      console.log('Assistant run started:', runId);
+    } catch (error) {
+      console.error('Run creation error:', error);
+      return res.status(500).json({
+        success: false,
+        error: 'Failed to start AI assistant. Please try again.'
+      });
     }
-    
-    const runJson = await runResp.json();
-    let runId = runJson.id;
-    console.log('Run started:', runId);
 
-    // 5. Wait for completion and handle function calls
+    // Wait for completion with timeout
+    console.log('Waiting for assistant response...');
+    let runStatus;
     let attempts = 0;
-    const maxAttempts = 30;
+    const maxAttempts = 30; // 30 seconds timeout
     
-    while (attempts < maxAttempts) {
-      await new Promise(resolve => setTimeout(resolve, 1000));
-      
-      const statusResp = await fetch(`https://api.openai.com/v1/threads/${currentThreadId}/runs/${runId}`, {
+    try {
+      while (attempts < maxAttempts) {
+        await new Promise(resolve => setTimeout(resolve, 1000)); // Wait 1 second
+        
+        const statusResponse = await fetch(`https://api.openai.com/v1/threads/${currentThreadId}/runs/${runId}`, {
+          headers: {
+            'Authorization': `Bearer ${OPENAI_API_KEY}`,
+            'OpenAI-Beta': 'assistants=v2'
+          }
+        });
+
+        if (!statusResponse.ok) {
+          const errorText = await statusResponse.text();
+          console.error('Status check failed:', errorText);
+          throw new Error(`Failed to check status: ${statusResponse.status}`);
+        }
+
+        runStatus = await statusResponse.json();
+        attempts++;
+        
+        console.log(`Attempt ${attempts}: Status is ${runStatus.status}`);
+        
+        if (runStatus.status === 'completed') {
+          break;
+        } else if (runStatus.status === 'failed' || runStatus.status === 'cancelled') {
+          throw new Error(`Assistant run ${runStatus.status}: ${runStatus.last_error?.message || 'Unknown error'}`);
+        } else if (runStatus.status !== 'queued' && runStatus.status !== 'in_progress') {
+          console.log('Unexpected status:', runStatus.status);
+        }
+      }
+    } catch (error) {
+      console.error('Run monitoring error:', error);
+      return res.status(500).json({
+        success: false,
+        error: 'Assistant processing failed. Please try again.'
+      });
+    }
+
+    // Check if completed successfully
+    if (!runStatus || runStatus.status !== 'completed') {
+      console.error('Assistant did not complete in time. Status:', runStatus?.status);
+      return res.status(408).json({
+        success: false,
+        error: 'Assistant response timed out. Please try again with a shorter message.'
+      });
+    }
+
+    // Get the assistant's response
+    console.log('Fetching assistant response...');
+    try {
+      const messagesResponse = await fetch(`https://api.openai.com/v1/threads/${currentThreadId}/messages`, {
         headers: {
           'Authorization': `Bearer ${OPENAI_API_KEY}`,
           'OpenAI-Beta': 'assistants=v2'
         }
       });
-      
-      if (!statusResp.ok) {
-        throw new Error('Failed to check run status');
+
+      if (!messagesResponse.ok) {
+        const errorText = await messagesResponse.text();
+        console.error('Messages fetch failed:', errorText);
+        throw new Error(`Failed to get response: ${messagesResponse.status}`);
       }
+
+      const messages = await messagesResponse.json();
       
-      const runStatus = await statusResp.json();
-      console.log(`Run status: ${runStatus.status}`);
-      
-      if (runStatus.status === 'completed') {
-        // Get the latest assistant message
-        const messagesResp = await fetch(`https://api.openai.com/v1/threads/${currentThreadId}/messages`, {
-          headers: {
-            'Authorization': `Bearer ${OPENAI_API_KEY}`,
-            'OpenAI-Beta': 'assistants=v2'
-          }
-        });
-        
-        if (!messagesResp.ok) {
-          throw new Error('Failed to get messages');
-        }
-        
-        const messagesJson = await messagesResp.json();
-        const assistantMessage = messagesJson.data.find(msg => msg.role === 'assistant');
-        
-        if (assistantMessage && assistantMessage.content[0]?.text?.value) {
-          return res.status(200).json({
-            success: true,
-            response: assistantMessage.content[0].text.value,
-            threadId: currentThreadId
-          });
-        }
-        
-        throw new Error('No assistant response found');
+      if (!messages.data || messages.data.length === 0) {
+        throw new Error('No messages returned from assistant');
       }
+
+      const assistantMessage = messages.data[0];
       
-      if (runStatus.status === 'requires_action') {
-        console.log('Handling function calls...');
-        const toolCalls = runStatus.required_action.submit_tool_outputs.tool_calls;
-        const toolOutputs = [];
-        
-        for (const toolCall of toolCalls) {
-          const functionName = toolCall.function.name;
-          const args = JSON.parse(toolCall.function.arguments);
-          
-          console.log(`Executing function: ${functionName}`);
-          
-          let result;
-          if (functionName === 'save_answer') {
-            result = await saveAnswerToSheet(args, GOOGLE_SHEETS_API_KEY, SPREADSHEET_ID);
-          } else if (functionName === 'generate_quote') {
-            result = await generateQuote(args.thread_id, GOOGLE_SHEETS_API_KEY, SPREADSHEET_ID);
-          } else {
-            result = { error: `Unknown function: ${functionName}` };
-          }
-          
-          toolOutputs.push({
-            tool_call_id: toolCall.id,
-            output: JSON.stringify(result)
-          });
-        }
-        
-        // Submit tool outputs
-        const submitResp = await fetch(`https://api.openai.com/v1/threads/${currentThreadId}/runs/${runId}/submit_tool_outputs`, {
-          method: 'POST',
-          headers: {
-            'Authorization': `Bearer ${OPENAI_API_KEY}`,
-            'Content-Type': 'application/json',
-            'OpenAI-Beta': 'assistants=v2'
-          },
-          body: JSON.stringify({
-            tool_outputs: toolOutputs
-          })
-        });
-        
-        if (!submitResp.ok) {
-          const errorText = await submitResp.text();
-          console.error('Failed to submit tool outputs:', errorText);
-          throw new Error('Failed to submit tool outputs');
-        }
+      if (!assistantMessage.content || assistantMessage.content.length === 0) {
+        throw new Error('Empty response from assistant');
       }
+
+      const responseText = assistantMessage.content[0]?.text?.value || 'I apologize, but I encountered an issue generating a response.';
       
-      if (runStatus.status === 'failed' || runStatus.status === 'cancelled' || runStatus.status === 'expired') {
-        throw new Error(`Run ${runStatus.status}: ${runStatus.last_error?.message || 'Unknown error'}`);
-      }
-      
-      attempts++;
+      console.log('Successfully got assistant response');
+      return res.status(200).json({
+        success: true,
+        response: responseText,
+        threadId: currentThreadId,
+        type: 'chat'
+      });
+
+    } catch (error) {
+      console.error('Response retrieval error:', error);
+      return res.status(500).json({
+        success: false,
+        error: 'Failed to retrieve assistant response. Please try again.'
+      });
     }
-    
-    throw new Error('Run timeout - assistant did not respond within expected time');
-    
+
   } catch (error) {
-    console.error('API Error:', error);
+    console.error('Unexpected error in chat handler:', error);
     return res.status(500).json({
       success: false,
-      error: error.message || 'Internal server error'
+      error: 'An unexpected error occurred. Please try again.'
     });
   }
 }
 
-// --- Helper Functions ---
-
-async function saveAnswerToSheet({ field, value, user_id, thread_id }, apiKey, spreadsheetId) {
-  if (!apiKey || !spreadsheetId) {
-    console.log('Google Sheets not configured, saving locally');
-    return { status: 'success', message: 'Data saved locally', field, value };
-  }
-
+// Function to process insurance quote using Google Sheets
+async function processInsuranceQuoteWithSheets(assessmentData, apiKey, spreadsheetId) {
+  console.log('Processing quote with Google Sheets...');
+  
   try {
-    const getRowsUrl = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/Assessments!A:Z?key=${apiKey}`;
-    const getRowsResp = await fetch(getRowsUrl);
-    
-    if (!getRowsResp.ok) {
-      throw new Error('Failed to access Google Sheets');
-    }
-    
-    const data = await getRowsResp.json();
-    const headers = data.values?.[0] || [];
-    const rows = data.values?.slice(1) || [];
-
-    let rowIndex = rows.findIndex(row => row[0] === thread_id);
-    let fieldColIndex = headers.indexOf(field);
-
-    if (fieldColIndex === -1) {
-      console.log(`Field ${field} not found in headers`);
-      return { status: 'error', message: `Field ${field} not found` };
-    }
-
-    if (rowIndex === -1) {
-      // Create new row
-      const newRow = Array(headers.length).fill('');
-      newRow[0] = thread_id;
-      newRow[1] = user_id;
-      newRow[fieldColIndex] = value;
+    // Prepare data for Google Sheets
+    const timestamp = new Date().toISOString();
+    const sheetData = [
+      ['Timestamp', timestamp],
+      ['Company Name', assessmentData.companyName || ''],
+      ['Industry', assessmentData.industry || ''],
+      ['Employee Count', assessmentData.employeeCount || ''],
+      ['Annual Revenue', assessmentData.annualRevenue || ''],
+      ['User ID', assessmentData.userId || ''],
+      ['Thread ID', assessmentData.threadId || ''],
       
-      const appendUrl = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/Assessments!A1:append?valueInputOption=RAW&key=${apiKey}`;
-      const appendResp = await fetch(appendUrl, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ values: [newRow] })
-      });
-      
-      if (!appendResp.ok) {
-        throw new Error('Failed to append to Google Sheets');
-      }
-    } else {
-      // Update existing row
-      const updateCell = String.fromCharCode(65 + fieldColIndex) + (rowIndex + 2);
-      const updateUrl = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/Assessments!${updateCell}?valueInputOption=RAW&key=${apiKey}`;
-      const updateResp = await fetch(updateUrl, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ values: [[value]] })
-      });
-      
-      if (!updateResp.ok) {
-        throw new Error('Failed to update Google Sheets');
-      }
-    }
+      // Category scores with defaults
+      ['MFA Score', assessmentData.scores?.mfa || 1],
+      ['Backup Score', assessmentData.scores?.backup || 1],
+      ['Vulnerability Mgmt Score', assessmentData.scores?.vulnerability || 1],
+      ['Incident Response Score', assessmentData.scores?.incident || 1],
+      ['Employee Training Score', assessmentData.scores?.training || 1],
+      ['Network Security Score', assessmentData.scores?.network || 1],
+      ['Data Protection Score', assessmentData.scores?.dataProtection || 1],
+      ['Endpoint Protection Score', assessmentData.scores?.endpoint || 1],
+      ['Security Monitoring Score', assessmentData.scores?.monitoring || 1],
+      ['Physical Security Score', assessmentData.scores?.physical || 1],
+      ['Vendor Risk Score', assessmentData.scores?.vendor || 1],
+      ['Business Continuity Score', assessmentData.scores?.continuity || 1],
+      ['Compliance Score', assessmentData.scores?.compliance || 1],
+      ['Identity Mgmt Score', assessmentData.scores?.identity || 1],
+      ['Payment Security Score', assessmentData.scores?.payment || 1],
+      ['Healthcare Data Score', assessmentData.scores?.healthcare || 1],
+      ['Security Testing Score', assessmentData.scores?.testing || 1],
+      ['Insurance History Score', assessmentData.scores?.history || 1]
+    ];
 
-    return { status: 'success', message: 'Data saved to Google Sheets', field, value };
-  } catch (error) {
-    console.error('Google Sheets error:', error);
-    return { status: 'error', message: error.message, field, value };
-  }
-}
-
-async function getAssessmentRowFromSheet(threadId, apiKey, spreadsheetId) {
-  if (!apiKey || !spreadsheetId) {
-    return { thread_id: threadId };
-  }
-
-  try {
-    const getRowsUrl = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/Assessments!A:Z?key=${apiKey}`;
-    const getRowsResp = await fetch(getRowsUrl);
+    // Write to Google Sheets (append to Assessments sheet)
+    const writeUrl = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/Assessments!A:B:append?valueInputOption=RAW&key=${apiKey}`;
     
-    if (!getRowsResp.ok) {
-      throw new Error('Failed to access Google Sheets');
-    }
-    
-    const data = await getRowsResp.json();
-    const headers = data.values?.[0] || [];
-    const rows = data.values?.slice(1) || [];
-
-    const row = rows.find(r => r[0] === threadId);
-    if (!row) {
-      return { thread_id: threadId };
-    }
-
-    const result = {};
-    headers.forEach((header, index) => {
-      result[header] = row[index] || '';
+    const writeResponse = await fetch(writeUrl, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        values: sheetData
+      })
     });
+
+    if (!writeResponse.ok) {
+      const errorText = await writeResponse.text();
+      console.error('Google Sheets write failed:', errorText);
+      throw new Error('Failed to write assessment data to Google Sheets');
+    }
+
+    console.log('Data written to Google Sheets successfully');
+
+    // Small delay to allow Google Sheets to calculate
+    await new Promise(resolve => setTimeout(resolve, 1000));
+
+    // Read calculated results from Google Sheets
+    const readUrl = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/Calculations!A35:B60?key=${apiKey}`;
     
-    return result;
+    const readResponse = await fetch(readUrl);
+    if (!readResponse.ok) {
+      const errorText = await readResponse.text();
+      console.error('Google Sheets read failed:', errorText);
+      throw new Error('Failed to read calculations from Google Sheets');
+    }
+
+    const sheetResults = await readResponse.json();
+    const values = sheetResults.values || [];
+    
+    console.log('Retrieved calculation results from Google Sheets');
+    
+    // Parse the calculated quote from the sheets
+    const quote = parseQuoteFromSheets(values, assessmentData);
+    
+    return quote;
+
   } catch (error) {
-    console.error('Error getting assessment data:', error);
-    return { thread_id: threadId };
+    console.error('Google Sheets processing error:', error);
+    throw error;
   }
 }
 
-async function generateQuote(threadId, apiKey, spreadsheetId) {
+// Function to parse quote results from Google Sheets
+function parseQuoteFromSheets(sheetValues, assessmentData) {
   try {
-    const rowData = await getAssessmentRowFromSheet(threadId, apiKey, spreadsheetId);
-    
-    // Calculate quote based on assessment data
-    const quote = calculateQuoteLocally(rowData);
+    // Create a lookup object from the sheet values
+    const dataLookup = {};
+    sheetValues.forEach(row => {
+      if (row.length >= 2) {
+        dataLookup[row[0]] = row[1];
+      }
+    });
+
+    // Extract calculated values (adjust based on your sheet structure)
+    const riskScore = parseFloat(dataLookup['Final Risk Score']) || 2.5;
+    const riskLevel = dataLookup['Risk Level'] || 'Medium';
+    const recommendedCoverage = parseFloat(dataLookup['Recommended Coverage']) || 1000000;
+    const finalPremium = parseFloat(dataLookup['Final Premium']) || 5000;
+    const deductible = parseFloat(dataLookup['Recommended Deductible']) || 10000;
+    const basePremium = parseFloat(dataLookup['Base Premium']) || 4000;
     
     return {
-      status: 'success',
-      quote: quote,
-      formatted: formatQuoteResponse(quote)
+      riskScore: riskScore,
+      riskLevel: riskLevel,
+      recommendedCoverage: recommendedCoverage,
+      annualPremium: Math.round(finalPremium),
+      monthlyPremium: Math.round(finalPremium / 12),
+      deductible: deductible,
+      basePremium: Math.round(basePremium),
+      companyName: assessmentData.companyName,
+      industry: assessmentData.industry,
+      employeeCount: assessmentData.employeeCount,
+      quoteValid: 30, // days
+      timestamp: new Date().toISOString(),
+      quoteId: `CYB-${Date.now()}`
     };
   } catch (error) {
-    console.error('Quote generation error:', error);
-    return {
-      status: 'error',
-      message: error.message,
-      quote: calculateQuoteLocally({ thread_id: threadId })
-    };
+    console.error('Error parsing quote from sheets:', error);
+    throw new Error('Failed to parse calculation results from Google Sheets');
   }
 }
 
-function calculateQuoteLocally(rowData) {
-  // Basic quote calculation - you can enhance this with your actual logic
-  const companyName = rowData.companyName || rowData.company_name || "Your Company";
-  const industry = rowData.industry || "Technology";
-  const employeeCount = rowData.employeeCount || rowData.employee_count || "1-50";
+// Fallback function for local quote calculation
+function calculateQuoteLocally(assessmentData) {
+  console.log('Using local quote calculation fallback...');
   
-  // Simple risk scoring based on available data
-  let riskScore = 3.0; // Default medium risk
-  let riskLevel = "Medium";
+  // Industry base rates (per $1M coverage)
+  const industryRates = {
+    'Healthcare': 1200,
+    'Financial Services': 1100,
+    'Technology': 800,
+    'Education': 900,
+    'Manufacturing': 700,
+    'Retail': 750,
+    'Professional Services': 650,
+    'Government': 1000,
+    'Other': 750
+  };
+
+  // Size modifiers
+  const sizeModifiers = {
+    '1-10': 0.9,
+    '11-50': 0.95,
+    '51-250': 1.0,
+    '251-1000': 1.05,
+    '1000+': 1.1
+  };
+
+  // Calculate weighted risk score
+  const scores = assessmentData.scores || {};
+  const weights = {
+    mfa: 0.15, backup: 0.12, vulnerability: 0.10, incident: 0.10, training: 0.08
+  };
   
-  // Adjust based on some basic factors
-  if (rowData.mfa_implemented === "Yes") riskScore += 0.3;
-  if (rowData.backup_tested === "Yes") riskScore += 0.2;
-  if (rowData.security_training === "Yes") riskScore += 0.2;
+  let riskScore = 0;
+  Object.keys(weights).forEach(category => {
+    riskScore += (scores[category] || 1) * weights[category];
+  });
   
-  if (riskScore >= 3.5) riskLevel = "Low";
-  else if (riskScore < 2.5) riskLevel = "High";
+  // Add remaining categories with equal weight
+  const remainingWeight = 1 - Object.values(weights).reduce((a, b) => a + b, 0);
+  const remainingCategories = 13; // Total 18 - 5 major categories
+  const categoryWeight = remainingWeight / remainingCategories;
   
-  // Basic premium calculation
-  let basePremium = 5000;
-  if (industry === "Healthcare") basePremium *= 1.3;
-  if (industry === "Financial") basePremium *= 1.2;
+  riskScore += categoryWeight * remainingCategories * 2; // Assume average score of 2
   
-  const riskMultiplier = riskLevel === "Low" ? 0.8 : riskLevel === "High" ? 1.3 : 1.0;
-  const annualPremium = Math.round(basePremium * riskMultiplier);
+  // Apply modifiers
+  const baseRate = industryRates[assessmentData.industry] || industryRates['Other'];
+  const sizeModifier = sizeModifiers[assessmentData.employeeCount] || 1.0;
+  
+  // Determine coverage and premium
+  const recommendedCoverage = getRecommendedCoverage(assessmentData.annualRevenue);
+  const basePremium = (recommendedCoverage / 1000000) * baseRate;
+  
+  // Risk multiplier
+  let riskMultiplier = 1.0;
+  if (riskScore >= 3.5) riskMultiplier = 0.85; // Low risk discount
+  else if (riskScore < 2.5) riskMultiplier = 1.25; // High risk penalty
+  
+  const finalPremium = Math.round(basePremium * riskMultiplier * sizeModifier);
   
   return {
-    companyName,
-    industry,
-    employeeCount,
-    riskLevel,
-    riskScore: Math.min(4.0, riskScore),
-    recommendedCoverage: 1000000,
-    annualPremium,
-    monthlyPremium: Math.round(annualPremium / 12),
-    deductible: 10000,
-    quoteId: "CYB-" + Date.now(),
-    timestamp: new Date().toISOString()
+    riskScore: Math.round(riskScore * 100) / 100,
+    riskLevel: riskScore >= 3.5 ? 'Low' : riskScore >= 2.5 ? 'Medium' : 'High',
+    recommendedCoverage: recommendedCoverage,
+    annualPremium: finalPremium,
+    monthlyPremium: Math.round(finalPremium / 12),
+    deductible: getRecommendedDeductible(recommendedCoverage),
+    basePremium: Math.round(basePremium),
+    companyName: assessmentData.companyName,
+    industry: assessmentData.industry,
+    employeeCount: assessmentData.employeeCount,
+    quoteValid: 30,
+    timestamp: new Date().toISOString(),
+    quoteId: `CYB-${Date.now()}`
   };
 }
 
+// Helper function to get recommended coverage
+function getRecommendedCoverage(revenueRange) {
+  const coverageMap = {
+    '<$1M': 1000000,
+    '$1M-$10M': 5000000,
+    '$10M-$100M': 25000000,
+    '$100M+': 50000000
+  };
+  return coverageMap[revenueRange] || 1000000;
+}
+
+// Helper function to get recommended deductible
+function getRecommendedDeductible(coverage) {
+  if (coverage <= 5000000) return 10000;
+  if (coverage <= 15000000) return 25000;
+  return 50000;
+}
+
+// Function to format the quote response for the user
 function formatQuoteResponse(quote) {
-  return `
-🔒 **CYBERSECURITY INSURANCE QUOTE**
+  return `🔒 **CYBERSECURITY INSURANCE QUOTE**
 
 **Company**: ${quote.companyName}
 **Industry**: ${quote.industry} | **Employees**: ${quote.employeeCount}
-**Risk Assessment**: ${quote.riskLevel} Risk (Score: ${quote.riskScore.toFixed(1)}/4.0)
+**Risk Assessment**: ${quote.riskLevel} Risk (Score: ${quote.riskScore}/4.0)
 
 💰 **RECOMMENDED COVERAGE**
-• **Coverage Limit**: $${quote.recommendedCoverage?.toLocaleString()}
-• **Annual Premium**: $${quote.annualPremium?.toLocaleString()}
-• **Monthly Premium**: $${quote.monthlyPremium?.toLocaleString()}
-• **Deductible**: $${quote.deductible?.toLocaleString()}
+• **Coverage Limit**: $${quote.recommendedCoverage.toLocaleString()}
+• **Annual Premium**: $${quote.annualPremium.toLocaleString()}
+• **Monthly Premium**: $${quote.monthlyPremium.toLocaleString()}
+• **Deductible**: $${quote.deductible.toLocaleString()}
+
+📋 **COVERAGE INCLUDES**
+✅ Data breach response & notification costs
+✅ Cyber extortion & ransomware coverage
+✅ Business interruption from cyber events
+✅ Network security & privacy liability
+✅ Regulatory fines & penalties
+✅ Crisis management & PR services
+✅ Forensic investigation costs
+✅ Legal defense & settlements
+
+💡 **YOUR RISK PROFILE**
+${quote.riskLevel === 'Low' ? '🟢 **Excellent Security** - Your strong cybersecurity controls qualify you for preferred pricing!' :
+  quote.riskLevel === 'Medium' ? '🟡 **Good Foundation** - Solid security with room for improvement to reduce premiums.' :
+  '🔴 **Needs Attention** - Significant security gaps identified. Improvements could reduce your premium significantly.'}
 
 ⏰ **Quote Details**
 • Quote ID: ${quote.quoteId}
 • Valid until: ${new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toLocaleDateString()}
 • Generated: ${new Date(quote.timestamp).toLocaleDateString()}
 
-This quote is based on your current cybersecurity assessment. Improving your security controls could reduce your premium by up to 25%.
-`;
+**Next Steps**: Contact us to finalize your policy or ask about ways to improve your security posture for better rates!`;
 }
