@@ -1,16 +1,10 @@
 {
-  "name": "cybersecurity-insurance-chat",
   "version": 2,
-  "builds": [
-    {
-      "src": "public/**/*",
-      "use": "@vercel/static"
-    },
-    {
-      "src": "api/**/*.js",
-      "use": "@vercel/node"
+  "functions": {
+    "api/chat.js": {
+      "maxDuration": 30
     }
-  ],
+  },
   "routes": [
     {
       "src": "/api/(.*)",
@@ -25,10 +19,5 @@
     "OPENAI_API_KEY": "@openai-api-key",
     "GOOGLE_SHEETS_API_KEY": "@google-sheets-api-key",
     "GOOGLE_SPREADSHEET_ID": "@google-spreadsheet-id"
-  },
-  "functions": {
-    "api/chat.js": {
-      "maxDuration": 30
-    }
   }
 }
