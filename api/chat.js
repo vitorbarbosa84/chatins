@@ -1,4 +1,4 @@
-// /api/chat.js
+// /api/chat.js - Updated for your existing spreadsheet structure
 
 export default async function handler(req, res) {
   // --- CORS ---
@@ -25,10 +25,18 @@ export default async function handler(req, res) {
     });
   }
 
+  if (!GOOGLE_SHEETS_API_KEY || !SPREADSHEET_ID) {
+    console.warn('Google Sheets not configured properly');
+    return res.status(500).json({ 
+      success: false, 
+      error: 'Google Sheets configuration missing. Please set GOOGLE_SHEETS_API_KEY and GOOGLE_SPREADSHEET_ID environment variables.' 
+    });
+  }
+
   // --- REQUEST DATA ---
-  const { message, userId, threadId, assessmentData } = req.body;
+  const { message, userId, threadId } = req.body;
   
-  if (!message && !assessmentData?.requestQuote) {
+  if (!message) {
     return res.status(400).json({ 
       success: false, 
       error: "Message is required" 
@@ -61,45 +69,78 @@ export default async function handler(req, res) {
       console.log('Thread created:', currentThreadId);
     }
 
-    // 2. Add user message if present
-    if (message) {
-      console.log('Adding message to thread...');
-      const msgResp = await fetch(`https://api.openai.com/v1/threads/${currentThreadId}/messages`, {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${OPENAI_API_KEY}`,
-          'Content-Type': 'application/json',
-          'OpenAI-Beta': 'assistants=v2'
-        },
-        body: JSON.stringify({
-          role: 'user',
-          content: message
-        })
-      });
-      
-      if (!msgResp.ok) {
-        const errorText = await msgResp.text();
-        console.error('Message creation failed:', errorText);
-        throw new Error(`Failed to add message: ${msgResp.status}`);
-      }
+    // 2. Add user message
+    console.log('Adding message to thread...');
+    const msgResp = await fetch(`https://api.openai.com/v1/threads/${currentThreadId}/messages`, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${OPENAI_API_KEY}`,
+        'Content-Type': 'application/json',
+        'OpenAI-Beta': 'assistants=v2'
+      },
+      body: JSON.stringify({
+        role: 'user',
+        content: message
+      })
+    });
+    
+    if (!msgResp.ok) {
+      const errorText = await msgResp.text();
+      console.error('Message creation failed:', errorText);
+      throw new Error(`Failed to add message: ${msgResp.status}`);
     }
 
-    // 3. Function definitions
+    // 3. Function definitions - Updated for your spreadsheet structure
     const functionTools = [
       {
         type: "function",
         function: {
-          name: "save_answer",
-          description: "Save a user's answer to a specific assessment field",
+          name: "save_company_info",
+          description: "Save basic company information",
           parameters: {
             type: "object",
             properties: {
-              field: { type: "string" },
-              value: { type: "string" },
+              company_name: { type: "string" },
+              industry: { type: "string" },
+              employee_count: { type: "string" },
+              annual_revenue: { type: "string" },
               user_id: { type: "string" },
               thread_id: { type: "string" }
             },
-            required: ["field", "value", "user_id", "thread_id"]
+            required: ["company_name", "industry", "user_id", "thread_id"]
+          }
+        }
+      },
+      {
+        type: "function",
+        function: {
+          name: "save_category_score",
+          description: "Save a calculated score for a security category",
+          parameters: {
+            type: "object",
+            properties: {
+              category: { 
+                type: "string",
+                enum: [
+                  "MFA Score", "Backup Score", "Vulnerability Score", 
+                  "Incident Response Score", "Training Score", "Network Security Score",
+                  "Data Protection Score", "Endpoint Protection Score", 
+                  "Security Monitoring Score", "Physical Security Score",
+                  "Vendor Risk Score", "Business Continuity Score", 
+                  "Compliance Score", "Identity Management Score",
+                  "Payment Security Score", "Healthcare Data Score", 
+                  "Security Testing Score", "Insurance History Score"
+                ]
+              },
+              score: { 
+                type: "number",
+                minimum: 1,
+                maximum: 4,
+                description: "Score from 1-4 (Poor, Fair, Good, Excellent)"
+              },
+              thread_id: { type: "string" }
+            },
+            required: ["category", "score", "thread_id"]
           }
         }
       },
@@ -107,7 +148,7 @@ export default async function handler(req, res) {
         type: "function",
         function: {
           name: "generate_quote",
-          description: "Generate insurance quote based on assessment data",
+          description: "Generate insurance quote based on all category scores",
           parameters: {
             type: "object",
             properties: {
@@ -201,15 +242,28 @@ export default async function handler(req, res) {
           const functionName = toolCall.function.name;
           const args = JSON.parse(toolCall.function.arguments);
           
-          console.log(`Executing function: ${functionName}`);
+          console.log(`Executing function: ${functionName}`, args);
           
           let result;
-          if (functionName === 'save_answer') {
-            result = await saveAnswerToSheet(args, GOOGLE_SHEETS_API_KEY, SPREADSHEET_ID);
-          } else if (functionName === 'generate_quote') {
-            result = await generateQuote(args.thread_id, GOOGLE_SHEETS_API_KEY, SPREADSHEET_ID);
-          } else {
-            result = { error: `Unknown function: ${functionName}` };
+          try {
+            if (functionName === 'save_company_info') {
+              result = await saveCompanyInfo(args, GOOGLE_SHEETS_API_KEY, SPREADSHEET_ID);
+            } else if (functionName === 'save_category_score') {
+              result = await saveCategoryScore(args, GOOGLE_SHEETS_API_KEY, SPREADSHEET_ID);
+            } else if (functionName === 'generate_quote') {
+              result = await generateQuoteFromSheets(args.thread_id, GOOGLE_SHEETS_API_KEY, SPREADSHEET_ID);
+            } else {
+              result = { 
+                status: 'error', 
+                message: `Unknown function: ${functionName}` 
+              };
+            }
+          } catch (error) {
+            console.error(`Function ${functionName} error:`, error);
+            result = {
+              status: 'error',
+              message: error.message
+            };
           }
           
           toolOutputs.push({
@@ -256,42 +310,50 @@ export default async function handler(req, res) {
   }
 }
 
-// --- Helper Functions ---
+// --- Helper Functions for Your Spreadsheet Structure ---
 
-async function saveAnswerToSheet({ field, value, user_id, thread_id }, apiKey, spreadsheetId) {
-  if (!apiKey || !spreadsheetId) {
-    console.log('Google Sheets not configured, saving locally');
-    return { status: 'success', message: 'Data saved locally', field, value };
-  }
-
+async function saveCompanyInfo(data, apiKey, spreadsheetId) {
   try {
-    const getRowsUrl = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/Assessments!A:Z?key=${apiKey}`;
-    const getRowsResp = await fetch(getRowsUrl);
+    console.log('Saving company info:', data);
     
-    if (!getRowsResp.ok) {
-      throw new Error('Failed to access Google Sheets');
+    // Get existing data
+    const getUrl = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/Assessments!A:Z?key=${apiKey}`;
+    const getResp = await fetch(getUrl);
+    
+    if (!getResp.ok) {
+      throw new Error(`Failed to read Google Sheets: ${getResp.status}`);
     }
     
-    const data = await getRowsResp.json();
-    const headers = data.values?.[0] || [];
-    const rows = data.values?.slice(1) || [];
-
-    let rowIndex = rows.findIndex(row => row[0] === thread_id);
-    let fieldColIndex = headers.indexOf(field);
-
-    if (fieldColIndex === -1) {
-      console.log(`Field ${field} not found in headers`);
-      return { status: 'error', message: `Field ${field} not found` };
-    }
-
+    const sheetData = await getResp.json();
+    const headers = sheetData.values?.[0] || [];
+    const rows = sheetData.values?.slice(1) || [];
+    
+    // Map your headers to the expected column names
+    const headerMap = {
+      'Timestamp': 0,
+      'Company Name': 1,
+      'Industry': 2,
+      'Employee Count': 3,
+      'Annual Revenue': 4,
+      'User ID': 5,
+      'Thread ID': 6
+    };
+    
+    // Find existing row or create new one
+    let rowIndex = rows.findIndex(row => row[6] === data.thread_id); // Thread ID column
+    
     if (rowIndex === -1) {
       // Create new row
       const newRow = Array(headers.length).fill('');
-      newRow[0] = thread_id;
-      newRow[1] = user_id;
-      newRow[fieldColIndex] = value;
+      newRow[0] = new Date().toISOString(); // Timestamp
+      newRow[1] = data.company_name;
+      newRow[2] = data.industry;
+      newRow[3] = data.employee_count;
+      newRow[4] = data.annual_revenue;
+      newRow[5] = data.user_id;
+      newRow[6] = data.thread_id;
       
-      const appendUrl = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/Assessments!A1:append?valueInputOption=RAW&key=${apiKey}`;
+      const appendUrl = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/Assessments!A:A/append?valueInputOption=RAW&insertDataOption=INSERT_ROWS&key=${apiKey}`;
       const appendResp = await fetch(appendUrl, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -299,50 +361,148 @@ async function saveAnswerToSheet({ field, value, user_id, thread_id }, apiKey, s
       });
       
       if (!appendResp.ok) {
-        throw new Error('Failed to append to Google Sheets');
+        throw new Error('Failed to append company info');
       }
     } else {
       // Update existing row
-      const updateCell = String.fromCharCode(65 + fieldColIndex) + (rowIndex + 2);
-      const updateUrl = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/Assessments!${updateCell}?valueInputOption=RAW&key=${apiKey}`;
-      const updateResp = await fetch(updateUrl, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ values: [[value]] })
-      });
+      const updates = [
+        { range: `Assessments!B${rowIndex + 2}`, values: [[data.company_name]] },
+        { range: `Assessments!C${rowIndex + 2}`, values: [[data.industry]] },
+        { range: `Assessments!D${rowIndex + 2}`, values: [[data.employee_count]] },
+        { range: `Assessments!E${rowIndex + 2}`, values: [[data.annual_revenue]] }
+      ];
       
-      if (!updateResp.ok) {
-        throw new Error('Failed to update Google Sheets');
+      for (const update of updates) {
+        const updateUrl = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${update.range}?valueInputOption=RAW&key=${apiKey}`;
+        await fetch(updateUrl, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ values: update.values })
+        });
       }
     }
 
-    return { status: 'success', message: 'Data saved to Google Sheets', field, value };
+    return { 
+      status: 'success', 
+      message: 'Company info saved successfully'
+    };
+    
   } catch (error) {
-    console.error('Google Sheets error:', error);
-    return { status: 'error', message: error.message, field, value };
+    console.error('saveCompanyInfo error:', error);
+    return {
+      status: 'error',
+      message: error.message
+    };
   }
 }
 
-async function getAssessmentRowFromSheet(threadId, apiKey, spreadsheetId) {
-  if (!apiKey || !spreadsheetId) {
-    return { thread_id: threadId };
-  }
-
+async function saveCategoryScore(data, apiKey, spreadsheetId) {
   try {
-    const getRowsUrl = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/Assessments!A:Z?key=${apiKey}`;
-    const getRowsResp = await fetch(getRowsUrl);
+    console.log('Saving category score:', data);
     
-    if (!getRowsResp.ok) {
-      throw new Error('Failed to access Google Sheets');
+    // Get existing data
+    const getUrl = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/Assessments!A:Z?key=${apiKey}`;
+    const getResp = await fetch(getUrl);
+    
+    if (!getResp.ok) {
+      throw new Error(`Failed to read Google Sheets: ${getResp.status}`);
     }
     
-    const data = await getRowsResp.json();
-    const headers = data.values?.[0] || [];
-    const rows = data.values?.slice(1) || [];
+    const sheetData = await getResp.json();
+    const headers = sheetData.values?.[0] || [];
+    const rows = sheetData.values?.slice(1) || [];
+    
+    // Find the column for this category
+    const columnIndex = headers.indexOf(data.category);
+    if (columnIndex === -1) {
+      throw new Error(`Category ${data.category} not found in headers`);
+    }
+    
+    // Find the row for this thread
+    let rowIndex = rows.findIndex(row => row[6] === data.thread_id); // Thread ID column
+    
+    if (rowIndex === -1) {
+      throw new Error('Thread not found. Save company info first.');
+    }
+    
+    // Update the score
+    const cellAddress = String.fromCharCode(65 + columnIndex) + (rowIndex + 2);
+    const updateUrl = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/Assessments!${cellAddress}?valueInputOption=RAW&key=${apiKey}`;
+    
+    const updateResp = await fetch(updateUrl, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ values: [[data.score]] })
+    });
+    
+    if (!updateResp.ok) {
+      throw new Error('Failed to update category score');
+    }
 
-    const row = rows.find(r => r[0] === threadId);
+    return { 
+      status: 'success', 
+      message: `${data.category} updated to ${data.score}`,
+      category: data.category,
+      score: data.score
+    };
+    
+  } catch (error) {
+    console.error('saveCategoryScore error:', error);
+    return {
+      status: 'error',
+      message: error.message
+    };
+  }
+}
+
+async function generateQuoteFromSheets(threadId, apiKey, spreadsheetId) {
+  try {
+    console.log('Generating quote for thread:', threadId);
+    
+    // Get assessment data from sheets
+    const assessmentData = await getAssessmentData(threadId, apiKey, spreadsheetId);
+    
+    if (!assessmentData) {
+      throw new Error('No assessment data found');
+    }
+    
+    // Calculate overall risk score
+    const overallRiskScore = calculateOverallRiskScore(assessmentData);
+    
+    // Generate quote
+    const quote = generateQuote(assessmentData, overallRiskScore);
+    
+    return {
+      status: 'success',
+      quote: quote,
+      message: 'Quote generated successfully'
+    };
+    
+  } catch (error) {
+    console.error('generateQuoteFromSheets error:', error);
+    return {
+      status: 'error',
+      message: error.message
+    };
+  }
+}
+
+async function getAssessmentData(threadId, apiKey, spreadsheetId) {
+  try {
+    const getUrl = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/Assessments!A:Z?key=${apiKey}`;
+    const getResp = await fetch(getUrl);
+    
+    if (!getResp.ok) {
+      throw new Error('Failed to read Google Sheets');
+    }
+    
+    const sheetData = await getResp.json();
+    const headers = sheetData.values?.[0] || [];
+    const rows = sheetData.values?.slice(1) || [];
+    
+    const row = rows.find(r => r[6] === threadId); // Thread ID column
     if (!row) {
-      return { thread_id: threadId };
+      return null;
     }
 
     const result = {};
@@ -351,94 +511,95 @@ async function getAssessmentRowFromSheet(threadId, apiKey, spreadsheetId) {
     });
     
     return result;
+    
   } catch (error) {
-    console.error('Error getting assessment data:', error);
-    return { thread_id: threadId };
+    console.error('getAssessmentData error:', error);
+    throw error;
   }
 }
 
-async function generateQuote(threadId, apiKey, spreadsheetId) {
-  try {
-    const rowData = await getAssessmentRowFromSheet(threadId, apiKey, spreadsheetId);
-    
-    // Calculate quote based on assessment data
-    const quote = calculateQuoteLocally(rowData);
-    
-    return {
-      status: 'success',
-      quote: quote,
-      formatted: formatQuoteResponse(quote)
-    };
-  } catch (error) {
-    console.error('Quote generation error:', error);
-    return {
-      status: 'error',
-      message: error.message,
-      quote: calculateQuoteLocally({ thread_id: threadId })
-    };
+function calculateOverallRiskScore(data) {
+  // Your 18-category weighted scoring
+  const categoryWeights = {
+    'MFA Score': 0.15,
+    'Backup Score': 0.12,
+    'Vulnerability Score': 0.10,
+    'Incident Response Score': 0.10,
+    'Training Score': 0.08,
+    'Network Security Score': 0.08,
+    'Data Protection Score': 0.08,
+    'Endpoint Protection Score': 0.07,
+    'Security Monitoring Score': 0.06,
+    'Physical Security Score': 0.04,
+    'Vendor Risk Score': 0.04,
+    'Business Continuity Score': 0.04,
+    'Compliance Score': 0.03,
+    'Identity Management Score': 0.03,
+    'Payment Security Score': 0.03,
+    'Healthcare Data Score': 0.03,
+    'Security Testing Score': 0.02,
+    'Insurance History Score': 0.02
+  };
+  
+  let totalScore = 0;
+  let totalWeight = 0;
+  
+  for (const [category, weight] of Object.entries(categoryWeights)) {
+    const score = parseFloat(data[category]) || 0;
+    if (score > 0) {
+      totalScore += score * weight;
+      totalWeight += weight;
+    }
   }
+  
+  return totalWeight > 0 ? totalScore / totalWeight : 3.0;
 }
 
-function calculateQuoteLocally(rowData) {
-  // Basic quote calculation - you can enhance this with your actual logic
-  const companyName = rowData.companyName || rowData.company_name || "Your Company";
-  const industry = rowData.industry || "Technology";
-  const employeeCount = rowData.employeeCount || rowData.employee_count || "1-50";
+function generateQuote(data, riskScore) {
+  const companyName = data['Company Name'] || 'Your Company';
+  const industry = data['Industry'] || 'Technology';
+  const employeeCount = data['Employee Count'] || '1-50';
   
-  // Simple risk scoring based on available data
-  let riskScore = 3.0; // Default medium risk
-  let riskLevel = "Medium";
-  
-  // Adjust based on some basic factors
-  if (rowData.mfa_implemented === "Yes") riskScore += 0.3;
-  if (rowData.backup_tested === "Yes") riskScore += 0.2;
-  if (rowData.security_training === "Yes") riskScore += 0.2;
-  
-  if (riskScore >= 3.5) riskLevel = "Low";
-  else if (riskScore < 2.5) riskLevel = "High";
-  
-  // Basic premium calculation
+  // Calculate premium based on risk score and other factors
   let basePremium = 5000;
-  if (industry === "Healthcare") basePremium *= 1.3;
-  if (industry === "Financial") basePremium *= 1.2;
   
-  const riskMultiplier = riskLevel === "Low" ? 0.8 : riskLevel === "High" ? 1.3 : 1.0;
+  // Industry modifiers
+  const industryMultipliers = {
+    'Healthcare': 1.2,
+    'Financial': 1.2,
+    'Government': 1.1,
+    'Technology': 1.0,
+    'Retail': 1.0,
+    'Manufacturing': 0.95
+  };
+  
+  basePremium *= (industryMultipliers[industry] || 1.0);
+  
+  // Risk score modifier
+  const riskLevel = riskScore >= 3.5 ? 'Low' : riskScore >= 2.5 ? 'Medium' : 'High';
+  const riskMultiplier = riskLevel === 'Low' ? 0.8 : riskLevel === 'High' ? 1.3 : 1.0;
+  
   const annualPremium = Math.round(basePremium * riskMultiplier);
+  const monthlyPremium = Math.round(annualPremium / 12);
+  
+  // Coverage recommendations
+  let recommendedCoverage = 1000000;
+  if (employeeCount === '1000+') recommendedCoverage = 50000000;
+  else if (employeeCount === '251-1000') recommendedCoverage = 25000000;
+  else if (employeeCount === '51-250') recommendedCoverage = 10000000;
+  else if (employeeCount === '11-50') recommendedCoverage = 5000000;
   
   return {
     companyName,
     industry,
     employeeCount,
     riskLevel,
-    riskScore: Math.min(4.0, riskScore),
-    recommendedCoverage: 1000000,
+    riskScore: Math.round(riskScore * 10) / 10,
+    recommendedCoverage,
     annualPremium,
-    monthlyPremium: Math.round(annualPremium / 12),
-    deductible: 10000,
-    quoteId: "CYB-" + Date.now(),
+    monthlyPremium,
+    deductible: Math.min(50000, Math.max(5000, Math.round(recommendedCoverage * 0.01))),
+    quoteId: 'CYB-' + Date.now(),
     timestamp: new Date().toISOString()
   };
-}
-
-function formatQuoteResponse(quote) {
-  return `
-🔒 **CYBERSECURITY INSURANCE QUOTE**
-
-**Company**: ${quote.companyName}
-**Industry**: ${quote.industry} | **Employees**: ${quote.employeeCount}
-**Risk Assessment**: ${quote.riskLevel} Risk (Score: ${quote.riskScore.toFixed(1)}/4.0)
-
-💰 **RECOMMENDED COVERAGE**
-• **Coverage Limit**: $${quote.recommendedCoverage?.toLocaleString()}
-• **Annual Premium**: $${quote.annualPremium?.toLocaleString()}
-• **Monthly Premium**: $${quote.monthlyPremium?.toLocaleString()}
-• **Deductible**: $${quote.deductible?.toLocaleString()}
-
-⏰ **Quote Details**
-• Quote ID: ${quote.quoteId}
-• Valid until: ${new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toLocaleDateString()}
-• Generated: ${new Date(quote.timestamp).toLocaleDateString()}
-
-This quote is based on your current cybersecurity assessment. Improving your security controls could reduce your premium by up to 25%.
-`;
 }
