@@ -413,40 +413,87 @@ async function saveCompanyInfo(data, apiKey, spreadsheetId) {
     console.log('Found row index:', rowIndex);
     
     if (rowIndex === -1) {
-      // Create new row at the end
+      // Create new row using append (which supports API keys)
       const newRowNumber = rows.length + 2; // +1 for header, +1 for 1-based indexing
       console.log('Creating new row at:', newRowNumber);
       
-      // Use batch update instead of append
-      const updates = [
-        { range: `Assessments!A${newRowNumber}`, values: [[new Date().toISOString()]] },
-        { range: `Assessments!B${newRowNumber}`, values: [[data.company_name]] },
-        { range: `Assessments!C${newRowNumber}`, values: [[data.industry]] },
-        { range: `Assessments!D${newRowNumber}`, values: [[data.employee_count]] },
-        { range: `Assessments!E${newRowNumber}`, values: [[data.annual_revenue]] },
-        { range: `Assessments!F${newRowNumber}`, values: [[data.user_id]] },
-        { range: `Assessments!G${newRowNumber}`, values: [[data.thread_id]] }
+      const newRow = [
+        new Date().toISOString(), // Timestamp
+        data.company_name,        // Company Name
+        data.industry,            // Industry  
+        data.employee_count,      // Employee Count
+        data.annual_revenue,      // Annual Revenue
+        data.user_id,             // User ID
+        data.thread_id            // Thread ID
       ];
       
-      const batchUpdateUrl = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values:batchUpdate?key=${apiKey}`;
-      const batchResp = await fetch(batchUpdateUrl, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          valueInputOption: 'RAW',
-          data: updates
-        })
-      });
-      
-      if (!batchResp.ok) {
-        const errorText = await batchResp.text();
-        console.error('Batch update error:', errorText);
-        throw new Error(`Failed to create new row: ${batchResp.status} - ${errorText}`);
+      // Pad with empty values for the score columns
+      while (newRow.length < headers.length) {
+        newRow.push('');
       }
       
-      console.log('New row created successfully');
+      console.log('Appending new row:', newRow);
+      
+      const appendUrl = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/Assessments!A1:append?valueInputOption=RAW&insertDataOption=INSERT_ROWS&key=${apiKey}`;
+      const appendResp = await fetch(appendUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ values: [newRow] })
+      });
+      
+      if (!appendResp.ok) {
+        const errorText = await appendResp.text();
+        console.error('Append error:', errorText);
+        throw new Error(`Failed to append new row: ${appendResp.status} - ${errorText}`);
+      }
+      
+      console.log('New row appended successfully');
     } else {
-      console.log('Row already exists, skipping update');
+      // Update existing row using individual cell updates
+      const actualRowNumber = rowIndex + 2; // +1 for header, +1 for 1-based indexing
+      console.log('Updating existing row:', actualRowNumber);
+      
+      // Update company name
+      if (data.company_name) {
+        const updateUrl = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/Assessments!B${actualRowNumber}?valueInputOption=RAW&key=${apiKey}`;
+        await fetch(updateUrl, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ values: [[data.company_name]] })
+        });
+      }
+      
+      // Update industry
+      if (data.industry) {
+        const updateUrl = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/Assessments!C${actualRowNumber}?valueInputOption=RAW&key=${apiKey}`;
+        await fetch(updateUrl, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ values: [[data.industry]] })
+        });
+      }
+      
+      // Update employee count
+      if (data.employee_count) {
+        const updateUrl = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/Assessments!D${actualRowNumber}?valueInputOption=RAW&key=${apiKey}`;
+        await fetch(updateUrl, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ values: [[data.employee_count]] })
+        });
+      }
+      
+      // Update annual revenue
+      if (data.annual_revenue) {
+        const updateUrl = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/Assessments!E${actualRowNumber}?valueInputOption=RAW&key=${apiKey}`;
+        await fetch(updateUrl, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ values: [[data.annual_revenue]] })
+        });
+      }
+      
+      console.log('Existing row updated successfully');
     }
 
     return { 
@@ -475,7 +522,54 @@ async function saveCategoryScore(data, apiKey, spreadsheetId) {
       };
     }
     
-    // Implementation similar to saveCompanyInfo but for scores
+    // Get existing data to find the row and column
+    const getUrl = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/Assessments!A:Z?key=${apiKey}`;
+    const getResp = await fetch(getUrl);
+    
+    if (!getResp.ok) {
+      const errorText = await getResp.text();
+      console.error('Get sheets error:', errorText);
+      throw new Error(`Failed to read Google Sheets: ${getResp.status} - ${errorText}`);
+    }
+    
+    const sheetData = await getResp.json();
+    const headers = sheetData.values?.[0] || [];
+    const rows = sheetData.values?.slice(1) || [];
+    
+    // Find the column for this category
+    const columnIndex = headers.indexOf(data.category);
+    if (columnIndex === -1) {
+      throw new Error(`Category "${data.category}" not found in headers`);
+    }
+    
+    // Find the row for this thread
+    let rowIndex = rows.findIndex(row => row[6] === data.thread_id); // Thread ID column
+    
+    if (rowIndex === -1) {
+      throw new Error('Thread not found. Save company info first.');
+    }
+    
+    // Update the score using individual cell update (API key compatible)
+    const actualRowNumber = rowIndex + 2; // +1 for header, +1 for 1-based indexing
+    const cellAddress = String.fromCharCode(65 + columnIndex) + actualRowNumber;
+    
+    console.log(`Updating cell ${cellAddress} with score ${data.score}`);
+    
+    const updateUrl = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/Assessments!${cellAddress}?valueInputOption=RAW&key=${apiKey}`;
+    const updateResp = await fetch(updateUrl, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ values: [[data.score]] })
+    });
+    
+    if (!updateResp.ok) {
+      const errorText = await updateResp.text();
+      console.error('Update score error:', errorText);
+      throw new Error(`Failed to update score: ${updateResp.status} - ${errorText}`);
+    }
+    
+    console.log('Category score updated successfully');
+    
     return { 
       status: 'success', 
       message: `${data.category} updated to ${data.score}`,
