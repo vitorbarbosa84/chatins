@@ -24,143 +24,25 @@ export default async function handler(req, res) {
   }
   let currentThreadId = threadId;
 
-  // --- 1. CREATE THREAD IF NEEDED ---
-  if (!currentThreadId) {
-    const threadResp = await fetch('https://api.openai.com/v1/threads', {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${OPENAI_API_KEY}`,
-        'Content-Type': 'application/json',
-        'OpenAI-Beta': 'assistants=v2'
-      }
-    });
-    const threadJson = await threadResp.json();
-    currentThreadId = threadJson.id;
-  }
-
-  // --- 2. ADD USER MESSAGE IF PRESENT ---
-  if (message) {
-    await fetch(`https://api.openai.com/v1/threads/${currentThreadId}/messages`, {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${OPENAI_API_KEY}`,
-        'Content-Type': 'application/json',
-        'OpenAI-Beta': 'assistants=v2'
-      },
-      body: JSON.stringify({
-        role: 'user',
-        content: message
-      })
-    });
-  }
-
-  // --- 3. FUNCTION DEFINITIONS (for function calling) ---
-  const functionTools = [
-    {
-      type: "function",
-      function: {
-        name: "save_answer",
-        description: "Save a user's answer to a specific assessment field",
-        parameters: {
-          type: "object",
-          properties: {
-            field: { type: "string", description: "The field, e.g. 'industry', 'mfa', etc." },
-            value: { type: "string", description: "The user's answer or score" },
-            user_id: { type: "string", description: "User ID" },
-            thread_id: { type: "string", description: "Thread ID" }
-          },
-          required: ["field", "value", "user_id", "thread_id"]
+  try {
+    // --- 1. CREATE THREAD IF NEEDED ---
+    if (!currentThreadId) {
+      const threadResp = await fetch('https://api.openai.com/v1/threads', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${OPENAI_API_KEY}`,
+          'Content-Type': 'application/json',
+          'OpenAI-Beta': 'assistants=v2'
         }
-      }
-    },
-    {
-      type: "function",
-      function: {
-        name: "generate_quote",
-        description: "Generate insurance quote",
-        parameters: {
-          type: "object",
-          properties: {
-            thread_id: { type: "string", description: "Thread ID" }
-          },
-          required: ["thread_id"]
-        }
-      }
+      });
+      if (!threadResp.ok) throw new Error('Failed to create thread');
+      const threadJson = await threadResp.json();
+      currentThreadId = threadJson.id;
     }
-  ];
 
-  // --- 4. SPECIAL CASE: DIRECT QUOTE REQUEST WITHOUT FUNCTION CALL (legacy) ---
-  if (assessmentData && assessmentData.requestQuote) {
-    // This is for compatibility with your original code, if triggering quote via POST body
-    // Fetch all data for this thread from Google Sheets
-    const sheetRow = await getAssessmentRowFromSheet(currentThreadId, GOOGLE_SHEETS_API_KEY, SPREADSHEET_ID);
-    let quote;
-    if (GOOGLE_SHEETS_API_KEY && SPREADSHEET_ID) {
-      quote = await processInsuranceQuoteWithSheets(sheetRow, GOOGLE_SHEETS_API_KEY, SPREADSHEET_ID);
-    } else {
-      quote = calculateQuoteLocally(sheetRow);
-    }
-    return res.status(200).json({
-      success: true,
-      response: formatQuoteResponse(quote),
-      threadId: currentThreadId,
-      quote: quote,
-      type: 'quote'
-    });
-  }
-
-  // --- 5. START RUN WITH FUNCTION CALLING ENABLED ---
-  const runResp = await fetch(`https://api.openai.com/v1/threads/${currentThreadId}/runs`, {
-    method: 'POST',
-    headers: {
-      'Authorization': `Bearer ${OPENAI_API_KEY}`,
-      'Content-Type': 'application/json',
-      'OpenAI-Beta': 'assistants=v2'
-    },
-    body: JSON.stringify({
-      assistant_id: ASSISTANT_ID,
-      tools: functionTools
-    })
-  });
-  const runJson = await runResp.json();
-  const runId = runJson.id;
-
-  // --- 6. WAIT FOR RUN TO REACH 'requires_action' OR 'completed' ---
-  let runStatus = "in_progress";
-  let attempts = 0, maxAttempts = 30;
-  while (attempts < maxAttempts && runStatus !== "completed" && runStatus !== "requires_action") {
-    await new Promise(r => setTimeout(r, 1000));
-    const statusResp = await fetch(`https://api.openai.com/v1/threads/${currentThreadId}/runs/${runId}`, {
-      headers: {
-        'Authorization': `Bearer ${OPENAI_API_KEY}`,
-        'OpenAI-Beta': 'assistants=v2'
-      }
-    });
-    const statusJson = await statusResp.json();
-    runStatus = statusJson.status;
-    attempts++;
-  }
-
-  // --- 7. GET MESSAGES ---
-  const messagesResp = await fetch(`https://api.openai.com/v1/threads/${currentThreadId}/messages`, {
-    headers: {
-      'Authorization': `Bearer ${OPENAI_API_KEY}`,
-      'OpenAI-Beta': 'assistants=v2'
-    }
-  });
-  const messagesJson = await messagesResp.json();
-  const latest = messagesJson.data[0];
-
-  // --- 8. FUNCTION CALL HANDLING ---
-  if (latest.role === "assistant" && latest.content[0]?.type === "function_call") {
-    const funcCall = latest.content[0].function_call;
-    const functionName = funcCall.name;
-    const args = JSON.parse(funcCall.arguments);
-
-    if (functionName === "save_answer") {
-      await saveAnswerToSheet(args, GOOGLE_SHEETS_API_KEY, SPREADSHEET_ID);
-      // Post function result
-      await fetch(`https://api.openai.com/v1/threads/${currentThreadId}/messages`, {
+    // --- 2. ADD USER MESSAGE IF PRESENT ---
+    if (message) {
+      const msgResp = await fetch(`https://api.openai.com/v1/threads/${currentThreadId}/messages`, {
         method: 'POST',
         headers: {
           'Authorization': `Bearer ${OPENAI_API_KEY}`,
@@ -168,26 +50,50 @@ export default async function handler(req, res) {
           'OpenAI-Beta': 'assistants=v2'
         },
         body: JSON.stringify({
-          role: "function",
-          name: "save_answer",
-          content: JSON.stringify({ status: "success", field: args.field, value: args.value })
+          role: 'user',
+          content: message
         })
       });
-      // Continue the run so assistant can go on
-      await fetch(`https://api.openai.com/v1/threads/${currentThreadId}/runs`, {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${OPENAI_API_KEY}`,
-          'Content-Type': 'application/json',
-          'OpenAI-Beta': 'assistants=v2'
-        },
-        body: JSON.stringify({ assistant_id: ASSISTANT_ID })
-      });
-      return res.status(200).json({ success: true, type: 'function_call', message: "Answer saved.", threadId: currentThreadId });
+      if (!msgResp.ok) throw new Error('Failed to add message to thread');
     }
 
-    if (functionName === "generate_quote") {
-      // Fetch all data for this thread from Google Sheets
+    // --- 3. FUNCTION DEFINITIONS ---
+    const functionTools = [
+      {
+        type: "function",
+        function: {
+          name: "save_answer",
+          description: "Save a user's answer to a specific assessment field",
+          parameters: {
+            type: "object",
+            properties: {
+              field: { type: "string" },
+              value: { type: "string" },
+              user_id: { type: "string" },
+              thread_id: { type: "string" }
+            },
+            required: ["field", "value", "user_id", "thread_id"]
+          }
+        }
+      },
+      {
+        type: "function",
+        function: {
+          name: "generate_quote",
+          description: "Generate insurance quote",
+          parameters: {
+            type: "object",
+            properties: {
+              thread_id: { type: "string" }
+            },
+            required: ["thread_id"]
+          }
+        }
+      }
+    ];
+
+    // --- 4. LEGACY DIRECT QUOTE REQUEST (optional) ---
+    if (assessmentData && assessmentData.requestQuote) {
       const sheetRow = await getAssessmentRowFromSheet(currentThreadId, GOOGLE_SHEETS_API_KEY, SPREADSHEET_ID);
       let quote;
       if (GOOGLE_SHEETS_API_KEY && SPREADSHEET_ID) {
@@ -195,40 +101,139 @@ export default async function handler(req, res) {
       } else {
         quote = calculateQuoteLocally(sheetRow);
       }
-      // Post function result
-      await fetch(`https://api.openai.com/v1/threads/${currentThreadId}/messages`, {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${OPENAI_API_KEY}`,
-          'Content-Type': 'application/json',
-          'OpenAI-Beta': 'assistants=v2'
-        },
-        body: JSON.stringify({
-          role: "function",
-          name: "generate_quote",
-          content: JSON.stringify(quote)
-        })
+      return res.status(200).json({
+        success: true,
+        response: formatQuoteResponse(quote),
+        threadId: currentThreadId,
+        quote: quote,
+        type: 'quote'
       });
-      // Continue the run so assistant can summarize the quote
-      await fetch(`https://api.openai.com/v1/threads/${currentThreadId}/runs`, {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${OPENAI_API_KEY}`,
-          'Content-Type': 'application/json',
-          'OpenAI-Beta': 'assistants=v2'
-        },
-        body: JSON.stringify({ assistant_id: ASSISTANT_ID })
-      });
-      return res.status(200).json({ success: true, type: 'function_call', message: "Quote generated.", threadId: currentThreadId });
     }
-  }
 
-  // --- 9. REGULAR ASSISTANT REPLY ---
-  let reply = "";
-  if (latest.role === "assistant" && latest.content[0]?.text?.value) {
-    reply = latest.content[0].text.value;
+    // --- 5. START RUN WITH FUNCTION CALLING ---
+    const runResp = await fetch(`https://api.openai.com/v1/threads/${currentThreadId}/runs`, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${OPENAI_API_KEY}`,
+        'Content-Type': 'application/json',
+        'OpenAI-Beta': 'assistants=v2'
+      },
+      body: JSON.stringify({
+        assistant_id: ASSISTANT_ID,
+        tools: functionTools
+      })
+    });
+    if (!runResp.ok) throw new Error('Failed to start run');
+    const runJson = await runResp.json();
+    const runId = runJson.id;
+
+    // --- 6. WAIT FOR RUN TO REACH 'requires_action' OR 'completed' ---
+    let runStatus = "in_progress";
+    let attempts = 0, maxAttempts = 30;
+    while (attempts < maxAttempts && runStatus !== "completed" && runStatus !== "requires_action") {
+      await new Promise(r => setTimeout(r, 1000));
+      const statusResp = await fetch(`https://api.openai.com/v1/threads/${currentThreadId}/runs/${runId}`, {
+        headers: {
+          'Authorization': `Bearer ${OPENAI_API_KEY}`,
+          'OpenAI-Beta': 'assistants=v2'
+        }
+      });
+      if (!statusResp.ok) throw new Error('Failed to check run status');
+      const statusJson = await statusResp.json();
+      runStatus = statusJson.status;
+      attempts++;
+    }
+
+    // --- 7. GET MESSAGES ---
+    const messagesResp = await fetch(`https://api.openai.com/v1/threads/${currentThreadId}/messages`, {
+      headers: {
+        'Authorization': `Bearer ${OPENAI_API_KEY}`,
+        'OpenAI-Beta': 'assistants=v2'
+      }
+    });
+    if (!messagesResp.ok) throw new Error('Failed to get messages');
+    const messagesJson = await messagesResp.json();
+    const latest = messagesJson.data[0];
+
+    // --- 8. FUNCTION CALL HANDLING ---
+    if (latest.role === "assistant" && latest.content[0]?.type === "function_call") {
+      const funcCall = latest.content[0].function_call;
+      const functionName = funcCall.name;
+      const args = JSON.parse(funcCall.arguments);
+
+      if (functionName === "save_answer") {
+        await saveAnswerToSheet(args, GOOGLE_SHEETS_API_KEY, SPREADSHEET_ID);
+        // Post function result
+        await fetch(`https://api.openai.com/v1/threads/${currentThreadId}/messages`, {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${OPENAI_API_KEY}`,
+            'Content-Type': 'application/json',
+            'OpenAI-Beta': 'assistants=v2'
+          },
+          body: JSON.stringify({
+            role: "function",
+            name: "save_answer",
+            content: JSON.stringify({ status: "success", field: args.field, value: args.value })
+          })
+        });
+        // Continue the run so assistant can go on
+        await fetch(`https://api.openai.com/v1/threads/${currentThreadId}/runs`, {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${OPENAI_API_KEY}`,
+            'Content-Type': 'application/json',
+            'OpenAI-Beta': 'assistants=v2'
+          },
+          body: JSON.stringify({ assistant_id: ASSISTANT_ID })
+        });
+        return res.status(200).json({ success: true, type: 'function_call', message: "Answer saved.", threadId: currentThreadId });
+      }
+
+      if (functionName === "generate_quote") {
+        const sheetRow = await getAssessmentRowFromSheet(currentThreadId, GOOGLE_SHEETS_API_KEY, SPREADSHEET_ID);
+        let quote;
+        if (GOOGLE_SHEETS_API_KEY && SPREADSHEET_ID) {
+          quote = await processInsuranceQuoteWithSheets(sheetRow, GOOGLE_SHEETS_API_KEY, SPREADSHEET_ID);
+        } else {
+          quote = calculateQuoteLocally(sheetRow);
+        }
+        await fetch(`https://api.openai.com/v1/threads/${currentThreadId}/messages`, {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${OPENAI_API_KEY}`,
+            'Content-Type': 'application/json',
+            'OpenAI-Beta': 'assistants=v2'
+          },
+          body: JSON.stringify({
+            role: "function",
+            name: "generate_quote",
+            content: JSON.stringify(quote)
+          })
+        });
+        await fetch(`https://api.openai.com/v1/threads/${currentThreadId}/runs`, {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${OPENAI_API_KEY}`,
+            'Content-Type': 'application/json',
+            'OpenAI-Beta': 'assistants=v2'
+          },
+          body: JSON.stringify({ assistant_id: ASSISTANT_ID })
+        });
+        return res.status(200).json({ success: true, type: 'function_call', message: "Quote generated.", threadId: currentThreadId });
+      }
+    }
+
+    // --- 9. REGULAR ASSISTANT REPLY ---
+    let reply = "";
+    if (latest.role === "assistant" && latest.content[0]?.text?.value) {
+      reply = latest.content[0].text.value;
+    }
+    return res.status(200).json({ success: true, response: reply, threadId: currentThreadId });
+  } catch (err) {
+    console.error('API Error:', err);
+    return res.status(500).json({ success: false, error: err.message || 'Internal error' });
   }
-  return res.status(200).json({ success: true, response: reply, threadId: currentThreadId });
 }
 
 // --- Helper: Save Answer to Sheet ---
@@ -274,13 +279,59 @@ async function getAssessmentRowFromSheet(threadId, apiKey, spreadsheetId) {
 
   const row = rows.find(r => r[0] === threadId);
   if (!row) throw new Error('No data found for this thread');
-  // Map row to object with header keys
   const result = {};
   headers.forEach((h, i) => {
     result[h] = row[i];
   });
   return result;
 }
+
+// --- QUOTE GENERATION PLACEHOLDER ---
+// Paste your processInsuranceQuoteWithSheets, calculateQuoteLocally, formatQuoteResponse, etc. here.
+
+function formatQuoteResponse(quote) {
+  return `
+🔒 **CYBERSECURITY INSURANCE QUOTE**
+
+**Company**: ${quote.companyName}
+**Industry**: ${quote.industry} | **Employees**: ${quote.employeeCount}
+**Risk Assessment**: ${quote.riskLevel} Risk (Score: ${quote.riskScore}/4.0)
+
+💰 **RECOMMENDED COVERAGE**
+• **Coverage Limit**: $${quote.recommendedCoverage?.toLocaleString()}
+• **Annual Premium**: $${quote.annualPremium?.toLocaleString()}
+• **Monthly Premium**: $${quote.monthlyPremium?.toLocaleString()}
+• **Deductible**: $${quote.deductible?.toLocaleString()}
+
+⏰ **Quote Details**
+• Quote ID: ${quote.quoteId}
+• Valid until: ${new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toLocaleDateString()}
+• Generated: ${new Date(quote.timestamp).toLocaleDateString()}
+`;
+}
+
+// Dummy fallback for local quote calculation (you can paste your real logic)
+function calculateQuoteLocally(rowObj) {
+  return {
+    companyName: rowObj.companyName || "Unknown",
+    industry: rowObj.industry || "Unknown",
+    employeeCount: rowObj.employeeCount || "Unknown",
+    riskLevel: "Medium",
+    riskScore: 3,
+    recommendedCoverage: 1000000,
+    annualPremium: 5000,
+    monthlyPremium: 416,
+    deductible: 10000,
+    quoteId: "CYB-" + Date.now(),
+    timestamp: new Date().toISOString()
+  };
+}
+
+// Dummy placeholder for Google Sheets logic (replace with your real formula logic)
+async function processInsuranceQuoteWithSheets(rowObj, apiKey, spreadsheetId) {
+  return calculateQuoteLocally(rowObj); // For now, just use local version
+}
+
 
 // Function to process insurance quote using Google Sheets
 async function processInsuranceQuoteWithSheets(assessmentData, apiKey, spreadsheetId) {
