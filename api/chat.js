@@ -20,10 +20,12 @@ module.exports = async function handler(req, res) {
     // --- ENV CHECK ---
     const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
     const ASSISTANT_ID = process.env.OPENAI_ASSISTANT_ID || 'asst_z7gDB3oQGSKyaqnSmGL82onH';
-    const GOOGLE_WEBHOOK_URL = process.env.GOOGLE_WEBHOOK_URL; // Apps Script webhook URL
+    const GOOGLE_WEBHOOK_URL = process.env.GOOGLE_WEBHOOK_URL || 'https://script.google.com/macros/s/AKfycbzi9mziTq4vfD1EoDrnvIf4j2f-RW7JlAYvDGSfJzuz4ebycwxNtD0nh3Np4G2ALdIHcA/exec';
 
     console.log('OpenAI API Key:', OPENAI_API_KEY ? 'Present' : 'Missing');
     console.log('Google Webhook URL:', GOOGLE_WEBHOOK_URL ? 'Present' : 'Missing');
+    console.log('Google Webhook URL Value:', GOOGLE_WEBHOOK_URL);
+    console.log('All Environment Variables:', Object.keys(process.env));
 
     if (!OPENAI_API_KEY) {
       return res.status(500).json({ 
