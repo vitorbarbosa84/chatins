@@ -20,7 +20,7 @@ module.exports = async function handler(req, res) {
     // --- ENV CHECK ---
     const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
     const ASSISTANT_ID = process.env.OPENAI_ASSISTANT_ID || 'asst_z7gDB3oQGSKyaqnSmGL82onH';
-    const GOOGLE_WEBHOOK_URL = process.env.GOOGLE_WEBHOOK_URL || 'https://script.google.com/macros/s/AKfycbzi9mziTq4vfD1EoDrnvIf4j2f-RW7JlAYvDGSfJzuz4ebycwxNtD0nh3Np4G2ALdIHcA/exec';
+    const GOOGLE_WEBHOOK_URL = process.env.GOOGLE_WEBHOOK_URL || 'https://script.google.com/macros/s/AKfycbwvrzpk8TXLspViO1LfZzdcABP0SG24_B3cn-PN08UOD4JHflKI4n5_B9GZ28FkZsCK_g/exec';
 
     console.log('OpenAI API Key:', OPENAI_API_KEY ? 'Present' : 'Missing');
     console.log('Google Webhook URL:', GOOGLE_WEBHOOK_URL ? 'Present' : 'Missing');
@@ -97,6 +97,22 @@ module.exports = async function handler(req, res) {
               annual_revenue: { type: "string" }
             },
             required: ["company_name", "industry"]
+          }
+        }
+      },
+      {
+        type: "function",
+        function: {
+          name: "save_contact_info",
+          description: "Save contact information for quote generation",
+          parameters: {
+            type: "object",
+            properties: {
+              contact_name: { type: "string" },
+              mobile_number: { type: "string" },
+              email_address: { type: "string" }
+            },
+            required: ["contact_name", "mobile_number"]
           }
         }
       },
@@ -218,6 +234,13 @@ module.exports = async function handler(req, res) {
               ...args,
               thread_id: currentThreadId,
               user_id: userId || 'user_' + Date.now(),
+              timestamp: new Date().toISOString()
+            }, GOOGLE_WEBHOOK_URL);
+            
+          } else if (functionName === 'save_contact_info') {
+            result = await sendToWebhook('contact_info', {
+              ...args,
+              thread_id: currentThreadId,
               timestamp: new Date().toISOString()
             }, GOOGLE_WEBHOOK_URL);
             
